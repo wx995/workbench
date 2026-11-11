@@ -1,4 +1,4 @@
-# 光谱与良率分析工作台
+﻿# 光谱与良率分析工作台
 
 滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 双规格一致性（EXP / AIR）判定。
 
@@ -6,7 +6,7 @@
 
 ## 打开
 
-https://995996-tech.github.io/workbench/
+https://wx995.github.io/workbench/
 
 ## 功能
 

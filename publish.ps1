@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Source = "",
   [string]$Message = ""
 )
@@ -27,4 +27,4 @@ git commit -m $msg
 if ($LASTEXITCODE -ne 0) { "没有需要提交的改动" }
 
 git push
-"已推送。约 1 分钟后生效：https://995996-tech.github.io/workbench/"
+"已推送。约 1 分钟后生效：https://wx995.github.io/workbench/"
