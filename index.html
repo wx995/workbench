@@ -387,6 +387,13 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 .dash-cell-d.up-bad{color:#cf222e}
 .dash-cell-d.flat{color:#8c959f}
 </style>
+<style>
+/* 差异图：重点模式 */
+.dual-cell.diff-key{background:#cf222e;border-color:#82071e;color:#fff;font-weight:700;box-shadow:inset 0 0 0 2px rgba(255,255,255,.85)}
+.dual-cell.diff-key:hover{outline-color:#82071e}
+.dual-cell.diff-pass-dim{background:#e9f4ea;border-color:#c9e2cb;color:#4c7a51}
+.dual-cell.diff-other-dim{background:#f1f3f5;border-color:#e1e5e9;color:#98a1aa}
+</style>
 </head>
 <body>
 
@@ -394,7 +401,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.5</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.6</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -986,13 +993,12 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
         <div class="dual-panel"><h4>差异</h4><div id="dual-map-diff" class="dual-grid"></div></div>
       </div>
       <div class="dual-legend">
-        <span><i style="background:#2da44e"></i>PASS</span>
-        <span><i style="background:#bf8700"></i>烘烤</span>
-        <span><i style="background:#cf222e"></i>不良</span>
-        <span><i style="background:#8c959f"></i>失效/重测</span>
-        <span><i style="background:#eaeef2;border:1px solid #d8dee4"></i>无位置</span>
-        <span><i style="background:#9a6700"></i>EXP 烘烤</span>
-        <span><i style="background:#a40e26"></i>EXP 不良</span>
+        <span><i style="background:#cf222e"></i><b>EXP 不良 / AIR 合格（重点）</b></span>
+        <span><i style="background:#e9f4ea;border:1px solid #c9e2cb"></i>一致 PASS</span>
+        <span><i style="background:#f1f3f5;border:1px solid #e1e5e9"></i>其它（含失效/重测）</span>
+        <span><i style="background:#f6f8fa;border:1px solid #d8dee4"></i>无位置</span>
+        <label class="chk-inline" style="margin-left:10px"><input type="checkbox" id="dual-focus" checked> 只突出重点</label>
+        <span style="color:var(--fg-muted);font-size:11px">EXP / AIR 图：绿=合格　橙=烘烤　红=不良　灰=失效</span>
       </div>
       <div id="dual-detail" class="dual-detail box-note" style="padding:10px 0 0">点击任意位置查看 EXP/AIR 参数、失败原因和两条曲线。</div>
     </div>
@@ -1409,7 +1415,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.5';
+const VERSION = 'v1.7.6';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9289,7 +9295,7 @@ const dualState = {
   expChoices: [], airChoices: [], expSpecItem: null, airSpecItem: null,
   ignore: { iso: false, ripple: false, maxil: false, deltacw: false, passband: false },
   positions: [], selected: null,
-  normMode: 'peak', showSpec: true,
+  normMode: 'peak', showSpec: true, focus: true,
   anomalyLevel: 'std', manual: {},
   confirmed: false, note: '',
   manualSpecs: [], chart: null, loading: false
@@ -9524,6 +9530,7 @@ function dualPickVerdict(s) {
 function dualDiffOf(exp, air) {
   if (exp === 'RETEST' || air === 'RETEST') return 'retest';
   if (exp === 'EXCLUDED' || air === 'EXCLUDED') return 'retest';
+  if (exp === 'FAIL' && air === 'PASS') return 'key';   /* 最影响判断：EXP 不良但 AIR 合格 */
   if (exp === 'FAIL') return 'exp-fail';
   if (exp === 'BAKE') return 'exp-bake';
   if (air === 'FAIL') return 'exp-pass-air-fail';
@@ -9610,8 +9617,9 @@ function dualAnomalyReason(a) {
 }
 
 const DUAL_LABELS = {
+  key: 'EXP 不良 / AIR 合格（重点）',
   pass: '一致 PASS', 'exp-pass-air-bake': 'EXP PASS / AIR 烘烤', 'exp-pass-air-fail': 'EXP PASS / AIR 不良',
-  'exp-bake': 'EXP 烘烤', 'exp-fail': 'EXP 不良', retest: '失效/重测', excluded: '测试异常（已排除）'
+  'exp-bake': 'EXP 烘烤', 'exp-fail': 'EXP 不良', retest: '失效/重测', excluded: '失效/重测'
 };
 
 /* ---------- 渲染 ---------- */
@@ -9635,7 +9643,9 @@ function dualRenderGrid(id, kind) {
           cls = p.air.v.cls === 'PASS' ? 'ver-pass' : p.air.v.cls === 'FAIL' ? 'ver-fail' : p.air.v.cls === 'BAKE' ? 'ver-bake' : p.air.v.cls === 'EXCLUDED' ? 'ver-excluded' : 'ver-retest';
           title = `${key} AIR ${p.air.v.label} · ${p.air.v.reason}`;
         } else {
-          cls = 'diff-' + p.diff;
+          cls = dualState.focus
+            ? (p.diff === 'key' ? 'diff-key' : p.diff === 'pass' ? 'diff-pass-dim' : 'diff-other-dim')
+            : (p.diff === 'key' ? 'diff-key' : 'diff-' + p.diff);
           title = `${key} · ${DUAL_LABELS[p.diff]}`;
         }
       }
@@ -9856,14 +9866,15 @@ function dualSpecOverlay(spec, color, peakY, side) {
 
 function dualRenderSummary() {
   const list = dualState.positions;
-  const sum = { total: list.length, pass: 0, apb: 0, apf: 0, eb: 0, ef: 0, rt: 0, ex: 0, mismatch: 0 };
+  const sum = { total: list.length, pass: 0, key: 0, other: 0, apb: 0, apf: 0, eb: 0, ef: 0, rt: 0, ex: 0, mismatch: 0 };
   for (const p of list) {
     if (p.diff === 'pass') sum.pass++;
-    else if (p.diff === 'exp-pass-air-bake') sum.apb++;
-    else if (p.diff === 'exp-pass-air-fail') sum.apf++;
-    else if (p.diff === 'exp-bake') sum.eb++;
-    else if (p.diff === 'exp-fail') sum.ef++;
-    else sum.rt++;
+    else if (p.diff === 'key') sum.key++;
+    else if (p.diff === 'exp-pass-air-bake') { sum.apb++; sum.other++; }
+    else if (p.diff === 'exp-pass-air-fail') { sum.apf++; sum.other++; }
+    else if (p.diff === 'exp-bake') { sum.eb++; sum.other++; }
+    else if (p.diff === 'exp-fail') { sum.ef++; sum.other++; }
+    else { sum.rt++; sum.other++; }
     if (p.exp.anomaly || p.air.anomaly) sum.ex++;
     if ((p.exp.soft && p.exp.soft.label !== p.exp.reLabel) || (p.air.soft && p.air.soft.label !== p.air.reLabel)) sum.mismatch++;
   }
@@ -9871,22 +9882,17 @@ function dualRenderSummary() {
   const card = (l, v, c) => `<div class="kpi ${c || ''}"><div class="kpi-label">${l}</div><div class="kpi-value">${v}</div></div>`;
   if (kpi) kpi.innerHTML = card('位置数', sum.total)
     + card('一致 PASS', sum.pass, 'ok')
-    + card('EXP PASS / AIR 烘烤', sum.apb, 'warn')
-    + card('EXP PASS / AIR 不良', sum.apf, 'bad')
-    + card('EXP 烘烤', sum.eb, 'warn')
-    + card('EXP 不良', sum.ef, 'bad')
+    + card('EXP 不良 / AIR 合格', sum.key, 'bad')
     + card('失效/重测', sum.rt, 'warn');
   const note = document.getElementById('dual-summary');
   if (note) {
-    const eff = sum.total - sum.rt - sum.ex;
-    const lv = ReadDataCore.ANOMALY_LEVELS[dualState.anomalyLevel];
+    const eff = sum.total - sum.rt;
     const src = dualIgnoreActive()
-      ? `<b style="color:#bf8700">当前为模拟：忽略 ${esc(dualIgnoreText())} 后重算</b>`
-      : '判定来源：软件汇总文件（-S2.xls / -S2-OSA.xls），与软件读取结果完全一致';
-    note.innerHTML = `${src}<br>有效 ${eff}/${sum.total} · 覆盖率 <b>${sum.total ? (100 * eff / sum.total).toFixed(1) : '0.0'}%</b> · 一次合格率 <b>${eff ? (100 * sum.pass / eff).toFixed(1) : '0.0'}%</b>`
-      + `<br>失效/重测判定：<b>${lv ? lv.name : '关闭'}</b>${lv ? `（波形宽度必须与批次一致；不良点：通带中间比两端低 ≥${lv.u2} dB；不良/烘烤：整体低 ≥${lv.big} dB（不看凹陷），或低 ≥${lv.drop} dB 且 ≥${lv.z}σ 且无深凹陷）` : ''} · 其中因波形异常转失效/重测 <b>${sum.ex}</b> 个位置`
-      + `<br>口径核对：重算与软件结果不一致 <b>${sum.mismatch}</b> 个位置${sum.mismatch ? '（已逐个在明细中标出）' : ''}`
-      + (sum.ef ? `<br><b style="color:#cf222e">EXP 不良 ${sum.ef} 个：AIR 不能覆盖。</b>` : '');
+      ? `<b style="color:#bf8700">模拟：忽略 ${esc(dualIgnoreText())} 后重算</b>`
+      : '判定来源：软件汇总文件（与软件读取结果一致）';
+    note.innerHTML = `${src} · 有效 ${eff}/${sum.total} · 一次合格率 <b>${eff ? (100 * sum.pass / eff).toFixed(1) : '0.0'}%</b>`
+      + (sum.key ? `<br><b style="color:#cf222e">重点：${sum.key} 个位置 EXP 不良但 AIR 合格 —— AIR 不能覆盖，优先复核。</b>` : '<br>没有「EXP 不良 / AIR 合格」的位置。')
+      + `<br><span style="color:var(--fg-muted)">其余 ${sum.other} 个：EXP PASS/AIR 烘烤 ${sum.apb} · 其它 EXP 不良 ${sum.ef} · EXP 烘烤 ${sum.eb} · EXP PASS/AIR 不良 ${sum.apf} · 失效/重测 ${sum.rt}（其中波形异常 ${sum.ex}）</span>`;
   }
   const noteTop = document.getElementById('dual-summary-note');
   if (noteTop) noteTop.textContent = sum.total ? `${sum.total} 个位置` : '未判定';
@@ -10065,6 +10071,15 @@ function dualInit() {
   if (nref) nref.addEventListener('input', dualRedraw);
   const chkSpec = document.getElementById('dual-chk-spec');
   if (chkSpec) chkSpec.addEventListener('change', e => { dualState.showSpec = !!e.target.checked; dualRedraw(); });
+
+  const chkFocus = document.getElementById('dual-focus');
+  if (chkFocus) {
+    chkFocus.checked = dualState.focus !== false;
+    chkFocus.addEventListener('change', e => {
+      dualState.focus = !!e.target.checked;
+      dualRenderAll();
+    });
+  }
 
   /* 异常判定等级 */
   const lvSel = document.getElementById('dual-anomaly-level');
