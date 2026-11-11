@@ -48,7 +48,13 @@ $msgFile = Join-Path $env:TEMP ("wb-commit-{0}.txt" -f [guid]::NewGuid().ToStrin
 try { git commit -F $msgFile } finally { Remove-Item $msgFile -ErrorAction SilentlyContinue }
 if ($LASTEXITCODE -ne 0) { throw "提交失败" }
 
-git push
-if ($LASTEXITCODE -ne 0) { throw "推送失败，检查网络/代理/token" }
+$pushed = $false
+for ($i = 1; $i -le 4; $i++) {
+  git push 2>&1 | Out-Null
+  if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
+  "推送第 $i 次失败，重试…"
+  Start-Sleep -Seconds (6 * $i)
+}
+if (-not $pushed) { throw "推送失败，检查网络/代理/token（git config --local http.proxy 当前为 $((git config --local --get http.proxy))）" }
 
 "已推送，约 1 分钟后生效：https://wx995.github.io/workbench/"
