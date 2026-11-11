@@ -13,10 +13,17 @@ if (-not (git config --local --get http.proxy)) {
 }
 
 if (-not $Source) {
-  $latest = Get-ChildItem "D:\Desktop\数据处理\光谱与良率分析工作台*.html" |
+  # 桌面目录被整理过：优先找 02_*/数据处理，找不到再回退旧路径
+  $dataDir = $null
+  $root = Get-ChildItem "D:\Desktop" -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.FullName "数据处理\光谱与良率分析工作台*.html") } |
+    Select-Object -First 1
+  if ($root) { $dataDir = Join-Path $root.FullName "数据处理" }
+  if (-not $dataDir) { $dataDir = "D:\Desktop\数据处理" }
+  $latest = Get-ChildItem (Join-Path $dataDir "光谱与良率分析工作台*.html") -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
-  if (-not $latest) { throw "未找到工作台 HTML（D:\Desktop\数据处理\光谱与良率分析工作台*.html）" }
+  if (-not $latest) { throw "未找到工作台 HTML（$dataDir\光谱与良率分析工作台*.html）" }
   $Source = $latest.FullName
 }
 if (-not (Test-Path $Source)) { throw "文件不存在：$Source" }

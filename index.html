@@ -344,6 +344,32 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 #dual-curve{width:100%;height:560px}
 .dual-curve-box{border:1px solid var(--border-muted);border-radius:6px;padding:8px}
 </style>
+<style>
+/* ===== 良率看板 v1.5 ===== */
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:12px;margin-bottom:14px}
+.dash-card{border:1px solid var(--border-muted);border-radius:10px;padding:12px 14px;background:var(--bg)}
+.dash-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.dash-head b{font-size:14px;letter-spacing:.2px}
+.dash-total{font-size:11px;color:var(--fg-muted)}
+.dash-main{padding-bottom:8px;border-bottom:1px dashed var(--border-muted)}
+.dash-label{font-size:11px;color:var(--fg-muted)}
+.dash-value{font-size:30px;font-weight:600;line-height:1.15;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px}
+.dash-value.ok{color:#1a7f37}.dash-value.warn{color:#9a6700}.dash-value.bad{color:#cf222e}
+.dash-sub{font-size:11px;color:var(--fg-muted)}
+.dash-rows{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.dash-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;font-size:12px;align-items:baseline}
+.dash-row .k{color:var(--fg-muted)}
+.dash-row .v{font-variant-numeric:tabular-nums;font-weight:500}
+.dash-d{font-size:11px;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+.dash-d.up-good{color:#1a7f37}.dash-d.up-bad{color:#cf222e}.dash-d.flat{color:#8c959f}
+.dash-note{font-size:10px;color:#8c959f;margin-top:6px}
+.dash-section-title{font-size:12px;font-weight:600;color:var(--fg-muted);margin:4px 0 6px}
+.dash-table td,.dash-table th{font-size:12px}
+.dash-table tr.dash-sum td{border-top:2px solid var(--border);background:var(--bg-subtle)}
+.dash-tag{font-size:10px;padding:0 5px;border-radius:8px;background:var(--bg-subtle);color:var(--fg-muted);border:1px solid var(--border-muted)}
+.dash-insight{margin:10px 0 6px;font-size:12px;line-height:1.8;color:var(--fg)}
+.dash-insight div{color:#57606a}
+</style>
 </head>
 <body>
 
@@ -351,7 +377,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率报告 · v1.4</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.5</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -367,7 +393,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <button class="tab" data-tab="yield">良率分析</button>
   <button class="tab" data-tab="trends">趋势专题</button>
   <button class="tab" data-tab="dual">双规格一致性</button>
-  <button class="tab" data-tab="report">良率报告</button>
+  <button class="tab" data-tab="report">良率看板</button>
 </nav>
 
 <main class="container">
@@ -1001,33 +1027,33 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 <section id="tab-report" class="tab-panel">
   <div class="box">
     <div class="box-header">
-      <h3>良率报告</h3>
+      <h3>良率看板</h3>
+      <span class="label label-neutral" id="dash-range">未加载</span>
       <div class="box-actions">
-        <button class="btn btn-primary btn-sm" id="btn-export-report">导出报告 HTML</button>
-        <button class="btn btn-sm" id="btn-print-report">打印 / 另存 PDF</button>
+        <button class="btn btn-primary btn-sm" id="dash-refresh">刷新</button>
+        <button class="btn btn-sm" id="dash-print">打印 / PDF</button>
       </div>
     </div>
-    <div class="chart-toolbar" id="report-filters">
-      <label class="chk-inline">时间
-        <input type="date" id="rep-start" class="inp-sm" style="width:132px">
-        <span>~</span>
-        <input type="date" id="rep-end" class="inp-sm" style="width:132px">
+    <div class="chart-toolbar">
+      <label class="chk-inline">对比窗口
+        <select id="dash-days" class="sel-sm">
+          <option value="7">最近 7 天 vs 前 7 天</option>
+          <option value="14">最近 14 天 vs 前 14 天</option>
+          <option value="30">最近 30 天 vs 前 30 天</option>
+        </select>
       </label>
-      <label class="chk-inline">PN
-        <input type="text" id="rep-pn" class="inp-sm" style="width:210px" placeholder="全部（逗号分隔）">
+      <label class="chk-inline">PN（最多 4 个，留空自动取产量前 4）
+        <input type="text" id="dash-pns" class="inp-sm" style="width:320px" placeholder="例如 90-20-0027,90-20-0028,90-90-0263">
       </label>
-      <div class="pn-chips" id="rep-pn-quick"></div>
-      <label class="chk-inline">烘烤次数
-        <select id="rep-bake" class="sel-sm" style="min-width:88px"><option value="">全部</option></select>
-      </label>
-      <button class="btn btn-sm" id="btn-report-apply">生成报告</button>
-      <span class="norm-info" id="report-scope"></span>
+      <button class="btn btn-sm" id="dash-apply">应用</button>
+      <span class="norm-info" id="dash-scope"></span>
     </div>
     <div class="box-body">
-      <div id="report-content"><div class="empty-hint">先导入良率数据，选择时间 / PN / 烘烤次数后生成报告。</div></div>
+      <div id="report-content"><div class="empty-hint">先导入良率数据，看板会自动显示最近 7 天与前 7 天的对比。</div></div>
     </div>
   </div>
 </section>
+
 
 </main>
 
@@ -1364,7 +1390,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.4.0';
+const VERSION = 'v1.5.0';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -8479,13 +8505,16 @@ function updateYieldPill() {
  * ============================================================ */
 
 function bindReportEvents() {
-  $('#btn-export-report').addEventListener('click', exportReportHtml);
-  $('#btn-print-report').addEventListener('click', () => window.print());
-  $('#btn-report-apply').addEventListener('click', applyReportFilters);
-  $('#rep-start').addEventListener('change', applyReportFilters);
-  $('#rep-end').addEventListener('change', applyReportFilters);
-  $('#rep-pn').addEventListener('change', applyReportFilters);
-  $('#rep-bake').addEventListener('change', applyReportFilters);
+  /* 旧「良率报告」已改为「良率看板」，元素不存在时直接跳过 */
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  const onc = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('change', fn); };
+  on('btn-export-report', exportReportHtml);
+  on('btn-print-report', () => window.print());
+  on('btn-report-apply', applyReportFilters);
+  onc('rep-start', applyReportFilters);
+  onc('rep-end', applyReportFilters);
+  onc('rep-pn', applyReportFilters);
+  onc('rep-bake', applyReportFilters);
 }
 
 /* ---------- 报告范围：时间 / PN / 烘烤次数 ---------- */
@@ -10134,6 +10163,288 @@ async function dualExportExcel() {
 }
 
 document.addEventListener('DOMContentLoaded', dualInit);
+
+</script>
+
+<script id="dashboard">
+/* ===== 良率看板（v1.5）——四个默认 PN · 最近7天 vs 前7天 ===== */
+(function (global) {
+  const LSK_PNS = 'wb-dash-pns';
+  const LSK_DAYS = 'wb-dash-days';
+
+  function dashDays() {
+    const n = Number(localStorage.getItem(LSK_DAYS) || 7);
+    return [7, 14, 30].includes(n) ? n : 7;
+  }
+  function dashPnsRaw() {
+    try { return String(localStorage.getItem(LSK_PNS) || ''); } catch (e) { return ''; }
+  }
+
+  function dashWindow(days) {
+    const d = state.yieldData;
+    const anchor = d && d.dateMax ? d.dateMax : '';
+    if (!anchor) return null;
+    const curEnd = anchor;
+    const curStart = addDays(curEnd, -(days - 1));
+    const prevEnd = addDays(curStart, -1);
+    const prevStart = addDays(prevEnd, -(days - 1));
+    return { curStart, curEnd, prevStart, prevEnd };
+  }
+
+  /* 1HT 后良率：按炉号算，再剔除「1HT 以后良品 > 1HT 总数」的炉号（跨周期/重测重复） */
+  function dashPostRate(rows, a, b) {
+    const g = new Map();
+    for (const r of rows) {
+      if (r.date < a || r.date > b) continue;
+      const k = bakeKeyLoose(r.烘烤次数);
+      if (!k || k === 'OK') continue;
+      const f = furnFullName(r.炉号) || r.炉号 || '__';
+      const x = g.get(f) || { post: 0, one: 0 };
+      x.post += r.良品;
+      if (k === '1HT') x.one += r.总数;
+      g.set(f, x);
+    }
+    let post = 0, one = 0;
+    for (const x of g.values()) {
+      if (!x.one) continue;
+      if (x.post > x.one + 0.5) continue;
+      post += x.post; one += x.one;
+    }
+    return one ? post / one : null;
+  }
+
+  function dashAgg(rows, a, b) {
+    let total = 0, ng = 0, wl = 0, retest = 0, bakeD = 0;
+    let onehtTotal = 0, onehtGood = 0, postGood = 0;
+    for (const r of rows) {
+      if (r.date < a || r.date > b) continue;
+      total += r.总数; ng += r.NG || 0; wl += r.波长长J || 0;
+      retest += r.重测 || 0; bakeD += r.烘烤D || 0;
+      const k = bakeKeyLoose(r.烘烤次数);
+      if (k === '1HT') { onehtTotal += r.总数; onehtGood += r.良品; }
+      if (k && k !== 'OK') postGood += r.良品;
+    }
+    const rate = v => (total ? v / total : null);
+    return {
+      total, ng, wl, retest, onehtTotal, onehtGood, postGood,
+      onehtRate: onehtTotal ? onehtGood / onehtTotal : null,
+      postRate: dashPostRate(rows, a, b),
+      ngRate: rate(ng), wlRate: rate(wl), retestRate: rate(retest), bakeRate: rate(bakeD)
+    };
+  }
+
+  /* 默认四个 PN：优先用这四类，数据里没有的再用产量前几名补齐 */
+  const DEFAULT_PNS = ['90-20-0027', '90-20-0028', '90-90-0263', '90-10-0007'];
+
+  function dashTopPns(win) {
+    const counts = new Map();
+    for (const r of state.yieldData.rows) {
+      if (r.date < win.curStart || r.date > win.curEnd) continue;
+      const k = pnKey(r.PN);
+      if (!k || k === '（空）') continue;
+      counts.set(k, (counts.get(k) || 0) + r.总数);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  }
+
+  function dashPickPns(win) {
+    const manual = dashPnsRaw().split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    if (manual.length) return manual.slice(0, 4);
+    const top = dashTopPns(win);
+    const avail = new Set(top);
+    const picked = DEFAULT_PNS.filter(p => avail.has(p));
+    for (const p of top) {
+      if (picked.length >= 4) break;
+      if (!picked.includes(p)) picked.push(p);
+    }
+    return picked.slice(0, 4);
+  }
+
+  function pp(v) { return v === null || !isFinite(v) ? null : v * 100; }
+  function dpp(cur, prev) {
+    if (cur === null || prev === null || cur === undefined || prev === undefined) return null;
+    return (cur - prev) * 100;
+  }
+  function dText(v, digits) {
+    if (v === null || !isFinite(v)) return '—';
+    return (v >= 0 ? '+' : '') + v.toFixed(digits === undefined ? 1 : digits) + 'pp';
+  }
+  function dCls(v, goodWhenUp) {
+    if (v === null || !isFinite(v) || Math.abs(v) < 0.05) return 'flat';
+    return (v > 0) === !!goodWhenUp ? 'up-good' : 'up-bad';
+  }
+  function rateCls(v, warn, bad) {
+    if (v === null || !isFinite(v)) return '';
+    return v >= warn ? 'ok' : v >= bad ? 'warn' : 'bad';
+  }
+
+  function renderDashboard() {
+    const wrap = document.getElementById('report-content');
+    const scope = document.getElementById('dash-scope');
+    if (!wrap) return;
+    const d = state.yieldData;
+    if (!d) {
+      wrap.innerHTML = '<div class="empty-hint">先在「良率分析」导入产量登记表，看板会自动取最近 7 天与前 7 天对比。</div>';
+      if (scope) scope.textContent = '';
+      setDashRange('');
+      return;
+    }
+    const days = dashDays();
+    const win = dashWindow(days);
+    if (!win) { wrap.innerHTML = '<div class="empty-hint">登记表里没有可用日期。</div>'; return; }
+    const pns = dashPickPns(win);
+    if (!pns.length) {
+      wrap.innerHTML = '<div class="empty-hint">最近 ' + days + ' 天没有可统计的 PN。</div>';
+      return;
+    }
+    setDashRange(`${win.curStart} ~ ${win.curEnd} vs ${win.prevStart} ~ ${win.prevEnd}`);
+
+    const cards = pns.map(pn => {
+      const rows = d.rows.filter(r => pnKey(r.PN) === pn);
+      const cur = dashAgg(rows, win.curStart, win.curEnd);
+      const prev = dashAgg(rows, win.prevStart, win.prevEnd);
+      const is0263 = /0263/.test(pn);
+      return { pn, cur, prev, is0263,
+        dOneht: dpp(cur.onehtRate, prev.onehtRate),
+        dPost: dpp(cur.postRate, prev.postRate),
+        dNg: dpp(cur.ngRate, prev.ngRate),
+        dWl: is0263 ? null : dpp(cur.wlRate, prev.wlRate),
+        dRetest: dpp(cur.retestRate, prev.retestRate),
+        dTotal: cur.total - prev.total };
+    });
+
+    const cardHtml = x => {
+      const c = x.cur, p = x.prev;
+      const main = c.onehtRate === null ? '—' : fmtPct(c.onehtRate, 1);
+      const dTag = x.dOneht === null ? '' : `<span class="dash-d ${dCls(x.dOneht, true)}">${dText(x.dOneht)}</span>`;
+      const row = (label, val, delta, goodUp, extra) => `
+        <div class="dash-row"><span class="k">${label}</span><span class="v">${val}</span>
+        ${delta === null ? '<span class="dash-d flat">—</span>' : `<span class="dash-d ${dCls(delta, goodUp)}">${dText(delta)}</span>`}</div>`;
+      return `<div class="dash-card">
+        <div class="dash-head"><b>${esc(x.pn)}</b><span class="dash-total">${c.total ? c.total.toLocaleString() + ' 只' : '无数据'}</span></div>
+        <div class="dash-main">
+          <div class="dash-label">1HT 良率</div>
+          <div class="dash-value ${rateCls(c.onehtRate, 0.9, 0.8)}">${main}${dTag}</div>
+          <div class="dash-sub">1HT ${c.onehtTotal.toLocaleString()} 只 · 良品 ${Math.round(c.onehtGood).toLocaleString()}</div>
+        </div>
+        <div class="dash-rows">
+          ${row('1HT 后良率', c.postRate === null ? '—' : fmtPct(c.postRate, 1), x.dPost, true)}
+          ${row('NG 率', c.ngRate === null ? '—' : fmtPct(c.ngRate, 2), x.dNg, false)}
+          ${row('波长长率', x.is0263 ? '—' : (c.wlRate === null ? '—' : fmtPct(c.wlRate, 2)), x.dWl, false)}
+          ${row('重测率', c.retestRate === null ? '—' : fmtPct(c.retestRate, 2), x.dRetest, false)}
+        </div>
+        ${x.is0263 ? '<div class="dash-note">该 PN 不考核波长长</div>' : ''}
+      </div>`;
+    };
+
+    const sumCur = dashAgg(d.rows, win.curStart, win.curEnd);
+    const sumPrev = dashAgg(d.rows, win.prevStart, win.prevEnd);
+    /* 0263 不考核波长长，合计里的波长长率也把它排除 */
+    const no0263 = rows => rows.filter(r => !String(pnKey(r.PN)).includes('0263'));
+    const wlCur = dashAgg(no0263(d.rows), win.curStart, win.curEnd).wlRate;
+    const wlPrev = dashAgg(no0263(d.rows), win.prevStart, win.prevEnd).wlRate;
+
+    const tbl = (arr) => {
+      let h = `<div class="tbl-wrap"><table class="tbl dash-table"><thead><tr>
+        <th>PN</th><th class="num">测试数</th><th class="num">1HT 良率</th><th class="num">1HT 后</th>
+        <th class="num">NG 率</th><th class="num">波长长率</th><th class="num">重测率</th><th class="num">本周 / 上周</th></tr></thead><tbody>`;
+      for (const x of arr) {
+        const c = x.cur;
+        h += `<tr><td><b>${esc(x.pn)}</b>${x.is0263 ? ' <span class="dash-tag">不考核波长长</span>' : ''}</td>
+          <td class="num">${c.total.toLocaleString()}</td>
+          <td class="num"><b>${c.onehtRate === null ? '—' : fmtPct(c.onehtRate, 1)}</b></td>
+          <td class="num">${c.postRate === null ? '—' : fmtPct(c.postRate, 1)}</td>
+          <td class="num">${c.ngRate === null ? '—' : fmtPct(c.ngRate, 2)}</td>
+          <td class="num">${x.is0263 ? '—' : (c.wlRate === null ? '—' : fmtPct(c.wlRate, 2))}</td>
+          <td class="num">${c.retestRate === null ? '—' : fmtPct(c.retestRate, 2)}</td>
+          <td class="num">${c.total.toLocaleString()} / ${x.prev.total.toLocaleString()}</td></tr>`;
+      }
+      const s = sumCur, sp = sumPrev;
+      h += `<tr class="dash-sum"><td><b>合计（全部 PN）</b></td>
+        <td class="num">${s.total.toLocaleString()}</td>
+        <td class="num"><b>${s.onehtRate === null ? '—' : fmtPct(s.onehtRate, 1)}</b></td>
+        <td class="num">${s.postRate === null ? '—' : fmtPct(s.postRate, 1)}</td>
+        <td class="num">${s.ngRate === null ? '—' : fmtPct(s.ngRate, 2)}</td>
+        <td class="num">${wlCur === null ? '—' : fmtPct(wlCur, 2)}</td>
+        <td class="num">${s.retestRate === null ? '—' : fmtPct(s.retestRate, 2)}</td>
+        <td class="num">${s.total.toLocaleString()} / ${sp.total.toLocaleString()}</td></tr>`;
+      h += '</tbody></table></div>';
+      return h;
+    };
+
+    /* 结论 */
+    const withYield = cards.filter(x => x.cur.onehtRate !== null);
+    const best = withYield.slice().sort((a, b) => b.cur.onehtRate - a.cur.onehtRate)[0];
+    const worst = withYield.slice().sort((a, b) => a.cur.onehtRate - b.cur.onehtRate)[0];
+    const movers = cards.filter(x => x.dNg !== null).slice().sort((a, b) => Math.abs(b.dNg) - Math.abs(a.dNg));
+    const lines = [];
+    if (best && worst && withYield.length > 1) {
+      lines.push(`1HT 良率最高 <b>${esc(best.pn)}</b> ${fmtPct(best.cur.onehtRate, 1)}，最低 <b>${esc(worst.pn)}</b> ${fmtPct(worst.cur.onehtRate, 1)}。`);
+    } else if (best) {
+      lines.push(`<b>${esc(best.pn)}</b> 1HT 良率 ${fmtPct(best.cur.onehtRate, 1)}。`);
+    }
+    if (movers.length && Math.abs(movers[0].dNg) >= 0.3) {
+      const m = movers[0];
+      lines.push(`NG 率变化最大：<b>${esc(m.pn)}</b> ${dText(m.dNg).replace('pp', ' pp')}（本周 ${fmtPct(m.cur.ngRate, 2)}，上周 ${fmtPct(m.prev.ngRate, 2)}）。`);
+    }
+    const wlUp = cards.filter(x => !x.is0263 && x.dWl !== null && x.dWl >= 0.3).sort((a, b) => b.dWl - a.dWl)[0];
+    if (wlUp) lines.push(`注意 <b>${esc(wlUp.pn)}</b> 波长长率上升 ${dText(wlUp.dWl)}，本周 ${fmtPct(wlUp.cur.wlRate, 2)}。`);
+    if (sumCur.total === 0) lines.push('本周没有测试记录，可能数据还没更新到最近日期。');
+
+    wrap.innerHTML = `
+      <div class="dash-grid">${cards.map(cardHtml).join('')}</div>
+      <div class="dash-section-title">明细对比（最近 ${days} 天 vs 前 ${days} 天）</div>
+      ${tbl(cards)}
+      <div class="dash-insight">${lines.map(t => `<div>· ${t}</div>`).join('')}</div>
+      <div class="box-note">口径：1HT 良率 = 1HT 良品 / 1HT 测试数；1HT 后良率按炉号计算并剔除「1HT 后良品 > 1HT 总数」的重复记录；NG 率、波长长率、重测率均为对应列合计 / 测试总数。本周 = ${win.curStart} ~ ${win.curEnd}，上周 = ${win.prevStart} ~ ${win.prevEnd}。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意 4 个 PN 并记住；90-90-0263 不考核波长长，合计里的波长长率也已排除它。</div>`;
+  }
+
+  function setDashRange(t) {
+    const el = document.getElementById('dash-range');
+    if (el) el.textContent = t || '未加载';
+  }
+
+  function dashRefresh() {
+    const inp = document.getElementById('dash-pns');
+    if (inp) inp.value = dashPnsRaw();
+    const sel = document.getElementById('dash-days');
+    if (sel) sel.value = String(dashDays());
+    renderDashboard();
+  }
+
+  function initDashboard() {
+    const sel = document.getElementById('dash-days');
+    if (sel) {
+      sel.value = String(dashDays());
+      sel.addEventListener('change', e => {
+        localStorage.setItem(LSK_DAYS, e.target.value);
+        renderDashboard();
+      });
+    }
+    const inp = document.getElementById('dash-pns');
+    if (inp) {
+      inp.value = dashPnsRaw();
+      const apply = () => {
+        localStorage.setItem(LSK_PNS, inp.value.trim());
+        renderDashboard();
+      };
+      inp.addEventListener('change', apply);
+      const btn = document.getElementById('dash-apply');
+      if (btn) btn.addEventListener('click', apply);
+    }
+    const rf = document.getElementById('dash-refresh');
+    if (rf) rf.addEventListener('click', () => { renderDashboard(); toast('看板已刷新', 'success'); });
+    const pr = document.getElementById('dash-print');
+    if (pr) pr.addEventListener('click', () => window.print());
+  }
+
+  /* 覆盖旧「良率报告」渲染 */
+  global.renderReport = renderDashboard;
+  global.renderDashboard = renderDashboard;
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDashboard);
+  else initDashboard();
+})(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
 </body>
