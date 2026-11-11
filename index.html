@@ -370,6 +370,14 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 .dash-insight{margin:10px 0 6px;font-size:12px;line-height:1.8;color:var(--fg)}
 .dash-insight div{color:#57606a}
 </style>
+<style>
+.dash-chart{height:280px;margin-bottom:10px}
+.dash-dim{color:var(--fg-muted);font-size:11px}
+.dash-row-sel{cursor:pointer}
+.dash-row-sel:hover td{background:var(--bg-subtle)}
+.dash-row-sel.on td{background:rgba(9,105,218,0.07)}
+.dash-row-sel.on td:first-child{box-shadow:inset 3px 0 0 #0969da}
+</style>
 </head>
 <body>
 
@@ -377,7 +385,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.5.1</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.6</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1035,15 +1043,18 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
       </div>
     </div>
     <div class="chart-toolbar">
-      <label class="chk-inline">对比窗口
-        <select id="dash-days" class="sel-sm">
-          <option value="7">最近 7 天 vs 前 7 天</option>
-          <option value="14">最近 14 天 vs 前 14 天</option>
-          <option value="30">最近 30 天 vs 前 30 天</option>
+      <label class="chk-inline">粒度
+        <select id="dash-gran" class="sel-sm">
+          <option value="month">按完整自然月</option>
+          <option value="week">按完整自然周</option>
+          <option value="d7">最近 7 天</option>
         </select>
       </label>
+      <label class="chk-inline">期间
+        <select id="dash-period" class="sel-sm" style="min-width:150px"></select>
+      </label>
       <label class="chk-inline">PN（最多 4 个，留空自动取产量前 4）
-        <input type="text" id="dash-pns" class="inp-sm" style="width:320px" placeholder="例如 90-20-0027,90-20-0028,90-90-0263">
+        <input type="text" id="dash-pns" class="inp-sm" style="width:300px" placeholder="例如 90-20-0027,90-20-0028,90-90-0263">
       </label>
       <button class="btn btn-sm" id="dash-apply">应用</button>
       <span class="norm-info" id="dash-scope"></span>
@@ -1390,7 +1401,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.5.1';
+const VERSION = 'v1.6.0';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -10167,31 +10178,76 @@ document.addEventListener('DOMContentLoaded', dualInit);
 </script>
 
 <script id="dashboard">
-/* ===== 良率看板（v1.5）——四个默认 PN · 最近7天 vs 前7天 ===== */
+/* ===== 良率看板 v1.6 —— 四个默认 PN · 日/周/月对比 ===== */
 (function (global) {
   const LSK_PNS = 'wb-dash-pns';
-  const LSK_DAYS = 'wb-dash-days';
+  const LSK_GRAN = 'wb-dash-gran';
+  const LSK_PERIOD = 'wb-dash-period';
+  const DEFAULT_PNS = ['90-20-0027', '90-20-0028', '90-90-0263', '90-20-0025'];
+  const D7 = 7;
 
-  function dashDays() {
-    const n = Number(localStorage.getItem(LSK_DAYS) || 7);
-    return [7, 14, 30].includes(n) ? n : 7;
+  /* ---------- 通用 ---------- */
+  function dashAns() { return Number(localStorage.getItem(LSK_PNS + '-d7') || 7) === 14 ? 14 : 7; }
+  function dashPnsRaw() { try { return String(localStorage.getItem(LSK_PNS) || ''); } catch (e) { return ''; } }
+  function dashGran() {
+    const g = String(localStorage.getItem(LSK_GRAN) || 'month');
+    return ['month', 'week', 'd7'].includes(g) ? g : 'month';
   }
-  function dashPnsRaw() {
-    try { return String(localStorage.getItem(LSK_PNS) || ''); } catch (e) { return ''; }
+  function s2d(s) { return new Date(s + 'T00:00:00Z'); }
+  function d2s(d) { return d.toISOString().slice(0, 10); }
+  function addD(s, n) { const d = s2d(s); d.setUTCDate(d.getUTCDate() + n); return d2s(d); }
+  function lastDayOfMonth(ym) {
+    const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+    return d2s(new Date(Date.UTC(y, m, 0)));
+  }
+  function mondayOf(s) {
+    const d = s2d(s);
+    const wd = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - wd);
+    return d2s(d);
   }
 
-  function dashWindow(days) {
-    const d = state.yieldData;
-    const anchor = d && d.dateMax ? d.dateMax : '';
-    if (!anchor) return null;
-    const curEnd = anchor;
-    const curStart = addDays(curEnd, -(days - 1));
-    const prevEnd = addDays(curStart, -1);
-    const prevStart = addDays(prevEnd, -(days - 1));
-    return { curStart, curEnd, prevStart, prevEnd };
+  /* ---------- 期间（只取完整月 / 完整周） ---------- */
+  function completeMonths() {
+    const max = state.yieldData.dateMax;
+    const out = [];
+    let y = 2026, m = 1;
+    while (true) {
+      const ym = y + '-' + String(m).padStart(2, '0');
+      const end = lastDayOfMonth(ym);
+      if (end > max) break;
+      out.push({ key: ym, label: ym, start: ym + '-01', end });
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  }
+  function completeWeeks() {
+    const min = '2026-01-01', max = state.yieldData.dateMax;
+    let mon = mondayOf(min);
+    if (mon < min) mon = addD(mon, 7);
+    const out = [];
+    while (true) {
+      const sun = addD(mon, 6);
+      if (sun > max) break;
+      const iso = isoWeekKey(mon);
+      out.push({ key: iso.label, label: iso.label, start: mon, end: sun });
+      mon = addD(mon, 7);
+    }
+    return out;
+  }
+  function periodsOf(gran) {
+    if (gran === 'month') return completeMonths();
+    if (gran === 'week') return completeWeeks();
+    const max = state.yieldData.dateMax;
+    const curEnd = max, curStart = addD(curEnd, -(D7 - 1));
+    const prevEnd = addD(curStart, -1), prevStart = addD(prevEnd, -(D7 - 1));
+    return [
+      { key: 'prev7', label: '前 7 天', start: prevStart, end: prevEnd },
+      { key: 'cur7', label: '最近 7 天', start: curStart, end: curEnd }
+    ];
   }
 
-  /* 1HT 后良率：按炉号算，再剔除「1HT 以后良品 > 1HT 总数」的炉号（跨周期/重测重复） */
+  /* ---------- 统计 ---------- */
   function dashPostRate(rows, a, b) {
     const g = new Map();
     for (const r of rows) {
@@ -10214,53 +10270,44 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
 
   function dashAgg(rows, a, b) {
-    let total = 0, ng = 0, wl = 0, retest = 0, bakeD = 0;
-    let onehtTotal = 0, onehtGood = 0, postGood = 0;
+    let total = 0, ng = 0, wl = 0, retest = 0, bakeD = 0, onehtTotal = 0, onehtGood = 0;
     for (const r of rows) {
       if (r.date < a || r.date > b) continue;
       total += r.总数; ng += r.NG || 0; wl += r.波长长J || 0;
       retest += r.重测 || 0; bakeD += r.烘烤D || 0;
       const k = bakeKeyLoose(r.烘烤次数);
       if (k === '1HT') { onehtTotal += r.总数; onehtGood += r.良品; }
-      if (k && k !== 'OK') postGood += r.良品;
     }
     const rate = v => (total ? v / total : null);
     return {
-      total, ng, wl, retest, onehtTotal, onehtGood, postGood,
+      total, ng, wl, retest, onehtTotal, onehtGood,
       onehtRate: onehtTotal ? onehtGood / onehtTotal : null,
       postRate: dashPostRate(rows, a, b),
       ngRate: rate(ng), wlRate: rate(wl), retestRate: rate(retest), bakeRate: rate(bakeD)
     };
   }
 
-  /* 默认四个 PN：优先用这四类，数据里没有的再用产量前几名补齐 */
-  const DEFAULT_PNS = ['90-20-0027', '90-20-0028', '90-90-0263', '90-20-0025'];
-
-  function dashTopPns(win) {
+  function dashTopPns(period) {
     const counts = new Map();
     for (const r of state.yieldData.rows) {
-      if (r.date < win.curStart || r.date > win.curEnd) continue;
+      if (r.date < period.start || r.date > period.end) continue;
       const k = pnKey(r.PN);
       if (!k || k === '（空）') continue;
       counts.set(k, (counts.get(k) || 0) + r.总数);
     }
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).map(x => x[0]);
   }
-
-  function dashPickPns(win) {
+  function dashPickPns(period) {
     const manual = dashPnsRaw().split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
     if (manual.length) return manual.slice(0, 4);
-    const top = dashTopPns(win);
+    const top = dashTopPns(period);
     const avail = new Set(top);
     const picked = DEFAULT_PNS.filter(p => avail.has(p));
-    for (const p of top) {
-      if (picked.length >= 4) break;
-      if (!picked.includes(p)) picked.push(p);
-    }
+    for (const p of top) { if (picked.length >= 4) break; if (!picked.includes(p)) picked.push(p); }
     return picked.slice(0, 4);
   }
 
-  function pp(v) { return v === null || !isFinite(v) ? null : v * 100; }
+  /* ---------- 格式化 ---------- */
   function dpp(cur, prev) {
     if (cur === null || prev === null || cur === undefined || prev === undefined) return null;
     return (cur - prev) * 100;
@@ -10278,46 +10325,52 @@ document.addEventListener('DOMContentLoaded', dualInit);
     return v >= warn ? 'ok' : v >= bad ? 'warn' : 'bad';
   }
 
+  /* ---------- 渲染 ---------- */
   function renderDashboard() {
     const wrap = document.getElementById('report-content');
-    const scope = document.getElementById('dash-scope');
     if (!wrap) return;
     const d = state.yieldData;
     if (!d) {
-      wrap.innerHTML = '<div class="empty-hint">先在「良率分析」导入产量登记表，看板会自动取最近 7 天与前 7 天对比。</div>';
-      if (scope) scope.textContent = '';
-      setDashRange('');
+      wrap.innerHTML = '<div class="empty-hint">先在「良率分析」导入产量登记表，看板会自动按完整自然月 / 完整自然周统计。</div>';
+      setRange('');
       return;
     }
-    const days = dashDays();
-    const win = dashWindow(days);
-    if (!win) { wrap.innerHTML = '<div class="empty-hint">登记表里没有可用日期。</div>'; return; }
-    const pns = dashPickPns(win);
-    if (!pns.length) {
-      wrap.innerHTML = '<div class="empty-hint">最近 ' + days + ' 天没有可统计的 PN。</div>';
-      return;
-    }
-    setDashRange(`${win.curStart} ~ ${win.curEnd} vs ${win.prevStart} ~ ${win.prevEnd}`);
+    const gran = dashGran();
+    const periods = periodsOf(gran);
+    if (!periods.length) { wrap.innerHTML = '<div class="empty-hint">还没有完整的自然月 / 周可统计。</div>'; return; }
+    fillPeriodSelect();
 
+    const stored = localStorage.getItem(LSK_PERIOD) || '';
+    let idx = periods.findIndex(p => p.key === stored);
+    if (idx < 0) idx = periods.length - 1;
+    const curP = periods[idx];
+    const prevP = gran === 'd7' ? periods[0] : (idx > 0 ? periods[idx - 1] : null);
+
+    setRange(gran === 'd7'
+      ? `${curP.start} ~ ${curP.end} vs ${prevP.start} ~ ${prevP.end}`
+      : `${curP.label}（${curP.start} ~ ${curP.end}）vs ${prevP ? prevP.label : '—'}`);
+
+    const pns = dashPickPns(curP);
     const cards = pns.map(pn => {
       const rows = d.rows.filter(r => pnKey(r.PN) === pn);
-      const cur = dashAgg(rows, win.curStart, win.curEnd);
-      const prev = dashAgg(rows, win.prevStart, win.prevEnd);
+      const cur = dashAgg(rows, curP.start, curP.end);
+      const prev = prevP ? dashAgg(rows, prevP.start, prevP.end) : null;
       const is0263 = /0263/.test(pn);
-      return { pn, cur, prev, is0263,
-        dOneht: dpp(cur.onehtRate, prev.onehtRate),
-        dPost: dpp(cur.postRate, prev.postRate),
-        dNg: dpp(cur.ngRate, prev.ngRate),
-        dWl: is0263 ? null : dpp(cur.wlRate, prev.wlRate),
-        dRetest: dpp(cur.retestRate, prev.retestRate),
-        dTotal: cur.total - prev.total };
+      return {
+        pn, cur, prev, is0263,
+        dOneht: prev ? dpp(cur.onehtRate, prev.onehtRate) : null,
+        dPost: prev ? dpp(cur.postRate, prev.postRate) : null,
+        dNg: prev ? dpp(cur.ngRate, prev.ngRate) : null,
+        dWl: (is0263 || !prev) ? null : dpp(cur.wlRate, prev.wlRate),
+        dRetest: prev ? dpp(cur.retestRate, prev.retestRate) : null
+      };
     });
 
     const cardHtml = x => {
-      const c = x.cur, p = x.prev;
+      const c = x.cur;
       const main = c.onehtRate === null ? '—' : fmtPct(c.onehtRate, 1);
       const dTag = x.dOneht === null ? '' : `<span class="dash-d ${dCls(x.dOneht, true)}">${dText(x.dOneht)}</span>`;
-      const row = (label, val, delta, goodUp, extra) => `
+      const row = (label, val, delta, goodUp) => `
         <div class="dash-row"><span class="k">${label}</span><span class="v">${val}</span>
         ${delta === null ? '<span class="dash-d flat">—</span>' : `<span class="dash-d ${dCls(delta, goodUp)}">${dText(delta)}</span>`}</div>`;
       return `<div class="dash-card">
@@ -10337,90 +10390,159 @@ document.addEventListener('DOMContentLoaded', dualInit);
       </div>`;
     };
 
-    const sumCur = dashAgg(d.rows, win.curStart, win.curEnd);
-    const sumPrev = dashAgg(d.rows, win.prevStart, win.prevEnd);
-    /* 0263 不考核波长长，合计里的波长长率也把它排除 */
-    const no0263 = rows => rows.filter(r => !String(pnKey(r.PN)).includes('0263'));
-    const wlCur = dashAgg(no0263(d.rows), win.curStart, win.curEnd).wlRate;
-    const wlPrev = dashAgg(no0263(d.rows), win.prevStart, win.prevEnd).wlRate;
+    /* ---- 趋势：全部完整月 / 完整周 ---- */
+    const no0263 = d.rows.filter(r => !String(pnKey(r.PN)).includes('0263'));
+    const trend = periods.map((p, i) => {
+      const a = dashAgg(d.rows, p.start, p.end);
+      const wl = dashAgg(no0263, p.start, p.end).wlRate;
+      const prev = i > 0 ? dashAgg(d.rows, periods[i - 1].start, periods[i - 1].end) : null;
+      return {
+        ...p, total: a.total, onehtRate: a.onehtRate, ngRate: a.ngRate, wlRate: wl,
+        retestRate: a.retestRate, dOneht: prev ? dpp(a.onehtRate, prev.onehtRate) : null
+      };
+    });
 
-    const tbl = (arr) => {
-      let h = `<div class="tbl-wrap"><table class="tbl dash-table"><thead><tr>
-        <th>PN</th><th class="num">测试数</th><th class="num">1HT 良率</th><th class="num">1HT 后</th>
-        <th class="num">NG 率</th><th class="num">波长长率</th><th class="num">重测率</th><th class="num">本周 / 上周</th></tr></thead><tbody>`;
-      for (const x of arr) {
-        const c = x.cur;
-        h += `<tr><td><b>${esc(x.pn)}</b>${x.is0263 ? ' <span class="dash-tag">不考核波长长</span>' : ''}</td>
-          <td class="num">${c.total.toLocaleString()}</td>
-          <td class="num"><b>${c.onehtRate === null ? '—' : fmtPct(c.onehtRate, 1)}</b></td>
-          <td class="num">${c.postRate === null ? '—' : fmtPct(c.postRate, 1)}</td>
-          <td class="num">${c.ngRate === null ? '—' : fmtPct(c.ngRate, 2)}</td>
-          <td class="num">${x.is0263 ? '—' : (c.wlRate === null ? '—' : fmtPct(c.wlRate, 2))}</td>
-          <td class="num">${c.retestRate === null ? '—' : fmtPct(c.retestRate, 2)}</td>
-          <td class="num">${c.total.toLocaleString()} / ${x.prev.total.toLocaleString()}</td></tr>`;
+    const trendTable = () => {
+      let h = `<div class="tbl-wrap" style="max-height:340px"><table class="tbl dash-table"><thead><tr>
+        <th>${gran === 'month' ? '月份' : gran === 'week' ? '周次' : '期间'}</th><th>区间</th>
+        <th class="num">测试数</th><th class="num">1HT 良率</th><th class="num">NG 率</th>
+        <th class="num">波长长率</th><th class="num">重测率</th><th class="num">1HT 环比</th></tr></thead><tbody>`;
+      for (const t of trend) {
+        const sel = t.key === curP.key;
+        const clickable = gran !== 'd7';
+        h += `<tr class="dash-row-sel${sel ? ' on' : ''}"${clickable ? ` data-dash-period="${esc(t.key)}"` : ''}>
+          <td><b>${esc(t.label)}</b></td><td class="dash-dim">${t.start} ~ ${t.end}</td>
+          <td class="num">${t.total.toLocaleString()}</td>
+          <td class="num"><b>${t.onehtRate === null ? '—' : fmtPct(t.onehtRate, 1)}</b></td>
+          <td class="num">${t.ngRate === null ? '—' : fmtPct(t.ngRate, 2)}</td>
+          <td class="num">${t.wlRate === null ? '—' : fmtPct(t.wlRate, 2)}</td>
+          <td class="num">${t.retestRate === null ? '—' : fmtPct(t.retestRate, 2)}</td>
+          <td class="num ${dCls(t.dOneht, true)}">${t.dOneht === null ? '—' : dText(t.dOneht)}</td></tr>`;
       }
-      const s = sumCur, sp = sumPrev;
-      h += `<tr class="dash-sum"><td><b>合计（全部 PN）</b></td>
-        <td class="num">${s.total.toLocaleString()}</td>
-        <td class="num"><b>${s.onehtRate === null ? '—' : fmtPct(s.onehtRate, 1)}</b></td>
-        <td class="num">${s.postRate === null ? '—' : fmtPct(s.postRate, 1)}</td>
-        <td class="num">${s.ngRate === null ? '—' : fmtPct(s.ngRate, 2)}</td>
-        <td class="num">${wlCur === null ? '—' : fmtPct(wlCur, 2)}</td>
-        <td class="num">${s.retestRate === null ? '—' : fmtPct(s.retestRate, 2)}</td>
-        <td class="num">${s.total.toLocaleString()} / ${sp.total.toLocaleString()}</td></tr>`;
+      const tot = dashAgg(d.rows, periods[0].start, periods[periods.length - 1].end);
+      const totWl = dashAgg(no0263, periods[0].start, periods[periods.length - 1].end).wlRate;
+      h += `<tr class="dash-sum"><td><b>合计</b></td><td class="dash-dim">${periods[0].start} ~ ${periods[periods.length - 1].end}</td>
+        <td class="num">${tot.total.toLocaleString()}</td>
+        <td class="num"><b>${tot.onehtRate === null ? '—' : fmtPct(tot.onehtRate, 1)}</b></td>
+        <td class="num">${tot.ngRate === null ? '—' : fmtPct(tot.ngRate, 2)}</td>
+        <td class="num">${totWl === null ? '—' : fmtPct(totWl, 2)}</td>
+        <td class="num">${tot.retestRate === null ? '—' : fmtPct(tot.retestRate, 2)}</td>
+        <td class="num">—</td></tr>`;
       h += '</tbody></table></div>';
       return h;
     };
 
-    /* 结论 */
+    /* ---- 结论 ---- */
     const withYield = cards.filter(x => x.cur.onehtRate !== null);
     const best = withYield.slice().sort((a, b) => b.cur.onehtRate - a.cur.onehtRate)[0];
     const worst = withYield.slice().sort((a, b) => a.cur.onehtRate - b.cur.onehtRate)[0];
-    const movers = cards.filter(x => x.dNg !== null).slice().sort((a, b) => Math.abs(b.dNg) - Math.abs(a.dNg));
     const lines = [];
     if (best && worst && withYield.length > 1) {
       lines.push(`1HT 良率最高 <b>${esc(best.pn)}</b> ${fmtPct(best.cur.onehtRate, 1)}，最低 <b>${esc(worst.pn)}</b> ${fmtPct(worst.cur.onehtRate, 1)}。`);
     } else if (best) {
       lines.push(`<b>${esc(best.pn)}</b> 1HT 良率 ${fmtPct(best.cur.onehtRate, 1)}。`);
     }
+    const movers = cards.filter(x => x.dNg !== null).sort((a, b) => Math.abs(b.dNg) - Math.abs(a.dNg));
     if (movers.length && Math.abs(movers[0].dNg) >= 0.3) {
       const m = movers[0];
-      lines.push(`NG 率变化最大：<b>${esc(m.pn)}</b> ${dText(m.dNg).replace('pp', ' pp')}（本周 ${fmtPct(m.cur.ngRate, 2)}，上周 ${fmtPct(m.prev.ngRate, 2)}）。`);
+      lines.push(`NG 率变化最大：<b>${esc(m.pn)}</b> ${dText(m.dNg)}（本期 ${fmtPct(m.cur.ngRate, 2)}，上期 ${fmtPct(m.prev.ngRate, 2)}）。`);
     }
     const wlUp = cards.filter(x => !x.is0263 && x.dWl !== null && x.dWl >= 0.3).sort((a, b) => b.dWl - a.dWl)[0];
-    if (wlUp) lines.push(`注意 <b>${esc(wlUp.pn)}</b> 波长长率上升 ${dText(wlUp.dWl)}，本周 ${fmtPct(wlUp.cur.wlRate, 2)}。`);
-    if (sumCur.total === 0) lines.push('本周没有测试记录，可能数据还没更新到最近日期。');
+    if (wlUp) lines.push(`注意 <b>${esc(wlUp.pn)}</b> 波长长率上升 ${dText(wlUp.dWl)}，本期 ${fmtPct(wlUp.cur.wlRate, 2)}。`);
+    if (!lines.length) lines.push('本期各项指标与上期基本持平。');
 
+    const granName = gran === 'month' ? '完整自然月' : gran === 'week' ? '完整自然周' : '最近 7 天';
     wrap.innerHTML = `
       <div class="dash-grid">${cards.map(cardHtml).join('')}</div>
-      <div class="dash-section-title">明细对比（最近 ${days} 天 vs 前 ${days} 天）</div>
-      ${tbl(cards)}
+      <div class="dash-section-title">${granName}趋势（全部 PN 合计${gran === 'd7' ? '' : '，点击行可切换期间'}）</div>
+      <div class="dash-chart" id="dash-trend"></div>
+      ${trendTable()}
       <div class="dash-insight">${lines.map(t => `<div>· ${t}</div>`).join('')}</div>
-      <div class="box-note">口径：1HT 良率 = 1HT 良品 / 1HT 测试数；1HT 后良率按炉号计算并剔除「1HT 后良品 > 1HT 总数」的重复记录；NG 率、波长长率、重测率均为对应列合计 / 测试总数。本周 = ${win.curStart} ~ ${win.curEnd}，上周 = ${win.prevStart} ~ ${win.prevEnd}。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意 4 个 PN 并记住；90-90-0263 不考核波长长，合计里的波长长率也已排除它。</div>`;
+      <div class="box-note">口径：1HT 良率 = 1HT 良品 / 1HT 测试数；1HT 后良率按炉号计算并剔除「1HT 后良品 > 1HT 总数」的重复记录；NG 率、波长长率、重测率均为对应列合计 / 测试总数。当前期间 ${curP.start} ~ ${curP.end}${prevP ? '，对比 ' + prevP.start + ' ~ ' + prevP.end : ''}。只统计完整期间（月看整月、周看周一~周日）；90-90-0263 不考核波长长，趋势与合计里的波长长率均已排除它。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意 4 个 PN 并记住。</div>`;
+
+    renderTrendChart(trend, gran);
   }
 
-  function setDashRange(t) {
+  function renderTrendChart(trend, gran) {
+    const el = document.getElementById('dash-trend');
+    if (!el || typeof echarts === 'undefined') return;
+    if (!trend.length) { el.innerHTML = '<div class="empty-hint">暂无可统计的完整期间。</div>'; return; }
+    const labels = trend.map(t => t.label);
+    const pct = v => (v === null || !isFinite(v) ? null : Math.round(v * 1000) / 10);
+    const chart = makeChart(el, {
+      animation: false,
+      grid: { left: 46, right: 18, top: 30, bottom: 46 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: ps => {
+          if (!ps || !ps.length) return '';
+          const i = ps[0].dataIndex;
+          const t = trend[i];
+          return `<b>${esc(t.label)}</b>（${t.start} ~ ${t.end}）<br>` +
+            `测试数：${t.total.toLocaleString()}<br>` +
+            `1HT 良率：<b>${t.onehtRate === null ? '—' : fmtPct(t.onehtRate, 1)}</b><br>` +
+            `NG 率：${t.ngRate === null ? '—' : fmtPct(t.ngRate, 2)}<br>` +
+            `波长长率：${t.wlRate === null ? '—' : fmtPct(t.wlRate, 2)}`;
+        }
+      },
+      legend: { top: 0, itemWidth: 14, textStyle: { fontSize: 11 } },
+      xAxis: {
+        type: 'category', data: labels,
+        axisLabel: { fontSize: 10, color: '#57606a', rotate: labels.length > 14 ? 40 : 0 },
+        axisLine: { lineStyle: { color: '#d0d7de' } }
+      },
+      yAxis: {
+        type: 'value', name: '%', nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 10, color: '#57606a', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: '#e5e9ee', type: 'dashed' } }
+      },
+      dataZoom: labels.length > 16 ? [{ type: 'inside' }, { type: 'slider', height: 14, bottom: 6 }] : [],
+      series: [
+        { name: '1HT 良率', type: 'bar', barMaxWidth: 26, itemStyle: { color: '#0969da' }, data: trend.map(t => pct(t.onehtRate)) },
+        { name: 'NG 率', type: 'line', smooth: true, symbolSize: 5, lineStyle: { width: 2, color: '#cf222e' }, itemStyle: { color: '#cf222e' }, data: trend.map(t => pct(t.ngRate)) },
+        { name: '波长长率', type: 'line', smooth: true, symbolSize: 5, lineStyle: { width: 2, color: '#bf8700' }, itemStyle: { color: '#bf8700' }, data: trend.map(t => pct(t.wlRate)) }
+      ]
+    });
+    if (chart) chart.resize();
+  }
+
+  function setRange(t) {
     const el = document.getElementById('dash-range');
     if (el) el.textContent = t || '未加载';
   }
 
-  function dashRefresh() {
-    const inp = document.getElementById('dash-pns');
-    if (inp) inp.value = dashPnsRaw();
-    const sel = document.getElementById('dash-days');
-    if (sel) sel.value = String(dashDays());
-    renderDashboard();
+  function fillPeriodSelect() {
+    const sel = document.getElementById('dash-period');
+    if (!sel || !state.yieldData) return;
+    const gran = dashGran();
+    const periods = periodsOf(gran);
+    if (gran === 'd7') {
+      sel.innerHTML = '<option value="cur7">最近 7 天 vs 前 7 天</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    const stored = localStorage.getItem(LSK_PERIOD) || '';
+    sel.innerHTML = periods.map(p => `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join('');
+    sel.value = periods.some(p => p.key === stored) ? stored : (periods.length ? periods[periods.length - 1].key : '');
   }
 
   function initDashboard() {
-    const sel = document.getElementById('dash-days');
-    if (sel) {
-      sel.value = String(dashDays());
-      sel.addEventListener('change', e => {
-        localStorage.setItem(LSK_DAYS, e.target.value);
+    const gran = document.getElementById('dash-gran');
+    if (gran) {
+      gran.value = dashGran();
+      gran.addEventListener('change', e => {
+        localStorage.setItem(LSK_GRAN, e.target.value);
+        localStorage.removeItem(LSK_PERIOD);
+        fillPeriodSelect();
         renderDashboard();
       });
     }
+    const per = document.getElementById('dash-period');
+    if (per) per.addEventListener('change', e => {
+      localStorage.setItem(LSK_PERIOD, e.target.value);
+      renderDashboard();
+    });
     const inp = document.getElementById('dash-pns');
     if (inp) {
       inp.value = dashPnsRaw();
@@ -10433,17 +10555,26 @@ document.addEventListener('DOMContentLoaded', dualInit);
       if (btn) btn.addEventListener('click', apply);
     }
     const rf = document.getElementById('dash-refresh');
-    if (rf) rf.addEventListener('click', () => { renderDashboard(); toast('看板已刷新', 'success'); });
+    if (rf) rf.addEventListener('click', () => { fillPeriodSelect(); renderDashboard(); toast('看板已刷新', 'success'); });
     const pr = document.getElementById('dash-print');
     if (pr) pr.addEventListener('click', () => window.print());
+    const wrap = document.getElementById('report-content');
+    if (wrap) wrap.addEventListener('click', e => {
+      const tr = e.target.closest('[data-dash-period]');
+      if (!tr) return;
+      localStorage.setItem(LSK_PERIOD, tr.dataset.dashPeriod);
+      fillPeriodSelect();
+      renderDashboard();
+    });
   }
 
-  /* 覆盖旧「良率报告」渲染 */
   global.renderReport = renderDashboard;
   global.renderDashboard = renderDashboard;
+  global.dashFillPeriodSelect = fillPeriodSelect;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDashboard);
-  else initDashboard();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { fillPeriodSelect(); initDashboard(); });
+  } else { fillPeriodSelect(); initDashboard(); }
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
