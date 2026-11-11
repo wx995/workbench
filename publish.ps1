@@ -7,11 +7,6 @@ $ErrorActionPreference = "Stop"
 $site = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $site
 
-# 本机走代理访问 github.com（Clash 默认端口，可在 git config 里改）
-if (-not (git config --local --get http.proxy)) {
-  git config --local http.proxy "http://127.0.0.1:7897" | Out-Null
-}
-
 if (-not $Source) {
   # 桌面目录被整理过：优先找 02_*/数据处理，找不到再回退旧路径
   $dataDir = $null
@@ -52,12 +47,15 @@ try { git commit -F $msgFile } finally { Remove-Item $msgFile -ErrorAction Silen
 if ($LASTEXITCODE -ne 0) { throw "提交失败" }
 
 $pushed = $false
-for ($i = 1; $i -le 4; $i++) {
-  git push 2>&1 | Out-Null
-  if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
-  "推送第 $i 次失败，重试…"
-  Start-Sleep -Seconds (6 * $i)
+# 先直连；直连不通再依次试本机常见代理端口（Clash 7897 / 7890）
+foreach ($px in @("", "http://127.0.0.1:7897", "http://127.0.0.1:7890")) {
+  for ($i = 1; $i -le 2; $i++) {
+    if ($px) { git -c "http.proxy=$px" push 2>&1 | Out-Null } else { git push 2>&1 | Out-Null }
+    if ($LASTEXITCODE -eq 0) { $pushed = $true; if ($px) { "（通过代理 $px 推送）" }; break }
+    Start-Sleep -Seconds 5
+  }
+  if ($pushed) { break }
 }
-if (-not $pushed) { throw "推送失败，检查网络/代理/token（git config --local http.proxy 当前为 $((git config --local --get http.proxy))）" }
+if (-not $pushed) { throw "推送失败：直连和本机代理都不通，检查网络或稍后重试" }
 
 "已推送，约 1 分钟后生效：https://wx995.github.io/workbench/"
