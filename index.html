@@ -394,7 +394,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.2</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.3</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -960,8 +960,8 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
         </select>
         <button class="btn btn-sm" id="btn-dual-ignore-reset">恢复全部参与</button>
         <span style="width:1px;height:18px;background:var(--border-muted)"></span>
-        <label title="按批次峰值插损与波形宽度判定测试异常：通带整体塌陷但宽度不变的点，判为测量异常并从不良中排除">
-          异常排除
+        <label title="按批次与波形判定：通带中间比两端低、或整体远低于批次的点，按失效/重测处理，不算不良">
+          波形异常
           <select id="dual-anomaly-level" class="sel-sm">
             <option value="off">关闭</option>
             <option value="loose">宽松</option>
@@ -990,7 +990,6 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
         <span><i style="background:#bf8700"></i>烘烤</span>
         <span><i style="background:#cf222e"></i>不良</span>
         <span><i style="background:#8c959f"></i>失效/重测</span>
-        <span><i style="background:#8250df"></i>测试异常（已排除）</span>
         <span><i style="background:#eaeef2;border:1px solid #d8dee4"></i>无位置</span>
         <span><i style="background:#9a6700"></i>EXP 烘烤</span>
         <span><i style="background:#a40e26"></i>EXP 不良</span>
@@ -1410,7 +1409,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.2';
+const VERSION = 'v1.7.3';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9475,8 +9474,8 @@ function dualPickVerdict(s) {
 }
 
 function dualDiffOf(exp, air) {
-  if (exp === 'EXCLUDED' || air === 'EXCLUDED') return 'excluded';
   if (exp === 'RETEST' || air === 'RETEST') return 'retest';
+  if (exp === 'EXCLUDED' || air === 'EXCLUDED') return 'retest';
   if (exp === 'FAIL') return 'exp-fail';
   if (exp === 'BAKE') return 'exp-bake';
   if (air === 'FAIL') return 'exp-pass-air-fail';
@@ -9527,7 +9526,7 @@ function dualCompute() {
     if (ovExp === true) an.exp = an.exp || { drop: NaN, z: NaN, manual: true };
     if (ovAir === false) an.air = null;
     if (ovAir === true) an.air = an.air || { drop: NaN, z: NaN, manual: true };
-    /* EXP / AIR 统一：只要有一侧判为测试异常，整点按测试异常处理 */
+    /* EXP / AIR 统一：只要有一侧波形判异常，整点按失效/重测处理 */
     const anyAn = !!(an.exp || an.air);
     for (const side of ['exp', 'air']) {
       const s = r[side];
@@ -9537,10 +9536,10 @@ function dualCompute() {
       s.manual = side === 'exp' ? ovExp : ovAir;
       const v = dualPickVerdict(s);
       if (s.anomaly) {
-        const why = s.anomaly.manual ? '手动标记为测试异常'
-          : s.anomaly.shared ? `同位置 ${s.anomaly.other} 判为测试异常，整点统一排除`
+        const why = s.anomaly.manual ? '手动标记'
+          : s.anomaly.shared ? `同位置 ${s.anomaly.other} 判为失效/重测，整点统一处理`
             : dualAnomalyReason(s.anomaly);
-        s.v = { cls: 'EXCLUDED', label: '测试异常', reason: why, source: v.source };
+        s.v = { cls: 'RETEST', label: '失效/重测', reason: why, source: v.source };
       } else s.v = v;
     }
     r.diff = dualDiffOf(r.exp.v.cls, r.air.v.cls);
@@ -9557,7 +9556,7 @@ function dualAnomalyReason(a) {
     if (isFinite(a.z)) parts.push(`${a.z.toFixed(1)}σ`);
     if (isFinite(a.u) && a.u >= 0.55) parts.push(`两侧比中间高 ${a.u.toFixed(2)} dB`);
   }
-  parts.push('波形宽度未变，判为测试异常');
+  parts.push('波形宽度未变，按失效/重测处理');
   return parts.join('，');
 }
 
@@ -9618,16 +9617,18 @@ function dualAnomalyLine(s, side) {
   if (!s.anomaly) return '';
   const a = s.anomaly;
   let txt;
-  if (a.manual) txt = '手动标记为测试异常';
-  else if (a.shared) txt = `同位置 ${a.other} 判为测试异常，整点统一排除`;
-  else {
+  if (a.manual) txt = '手动标记为失效/重测';
+  else if (a.shared) txt = `同位置 ${a.other} 判为失效/重测，整点统一处理`;
+  else if (a.why === 'u' && isFinite(a.u)) {
+    txt = `异常度：通带中间比两端低 <b>${a.u.toFixed(2)} dB</b>（两边高中间低），3dB 宽度 ${a.mW.toFixed(2)} nm 未变`;
+  } else {
     const seg = [];
     if (isFinite(a.drop)) seg.push(`比批次中位低 <b>${a.drop.toFixed(2)} dB</b>`);
     if (isFinite(a.z)) seg.push(`<b>${a.z.toFixed(1)}σ</b>`);
-    if (isFinite(a.u) && a.u >= 0.5) seg.push(`两侧比中间高 <b>${a.u.toFixed(2)} dB</b>`);
+    if (isFinite(a.u) && a.u >= 0.55) seg.push(`两侧比中间高 <b>${a.u.toFixed(2)} dB</b>`);
     txt = `异常度：${seg.join(' · ')}（批次中位插损 ${a.mIL.toFixed(2)} dB，3dB 宽度 ${a.mW.toFixed(2)} nm 未变）`;
   }
-  return `<div style="font-size:11px;color:#8250df;margin-top:2px">${esc(side)} ${txt}</div>`;
+  return `<div style="font-size:11px;color:#8c959f;margin-top:2px">${esc(side)} ${txt}</div>`;
 }
 
 function dualShowDetail(key) {
@@ -9811,8 +9812,8 @@ function dualRenderSummary() {
     else if (p.diff === 'exp-pass-air-fail') sum.apf++;
     else if (p.diff === 'exp-bake') sum.eb++;
     else if (p.diff === 'exp-fail') sum.ef++;
-    else if (p.diff === 'excluded') sum.ex++;
     else sum.rt++;
+    if (p.exp.anomaly || p.air.anomaly) sum.ex++;
     if ((p.exp.soft && p.exp.soft.label !== p.exp.reLabel) || (p.air.soft && p.air.soft.label !== p.air.reLabel)) sum.mismatch++;
   }
   const kpi = document.getElementById('dual-kpis');
@@ -9823,8 +9824,7 @@ function dualRenderSummary() {
     + card('EXP PASS / AIR 不良', sum.apf, 'bad')
     + card('EXP 烘烤', sum.eb, 'warn')
     + card('EXP 不良', sum.ef, 'bad')
-    + card('失效/重测', sum.rt, 'warn')
-    + card('测试异常（已排除）', sum.ex, 'warn');
+    + card('失效/重测', sum.rt, 'warn');
   const note = document.getElementById('dual-summary');
   if (note) {
     const eff = sum.total - sum.rt - sum.ex;
@@ -9833,7 +9833,7 @@ function dualRenderSummary() {
       ? `<b style="color:#bf8700">当前为模拟：忽略 ${esc(dualIgnoreText())} 后重算</b>`
       : '判定来源：软件汇总文件（-S2.xls / -S2-OSA.xls），与软件读取结果完全一致';
     note.innerHTML = `${src}<br>有效 ${eff}/${sum.total} · 覆盖率 <b>${sum.total ? (100 * eff / sum.total).toFixed(1) : '0.0'}%</b> · 一次合格率 <b>${eff ? (100 * sum.pass / eff).toFixed(1) : '0.0'}%</b>`
-      + `<br>异常排除：<b>${lv ? lv.name : '关闭'}</b>${lv ? `（波形宽度必须与批次一致；不良点：通带中间比两端低 ≥${lv.u2} dB；不良/烘烤：整体低 ≥${lv.big} dB，或低 ≥${lv.drop} dB 且 ≥${lv.z}σ 且无深凹陷）` : ''} · 已排除 <b>${sum.ex}</b> 个位置`
+      + `<br>失效/重测判定：<b>${lv ? lv.name : '关闭'}</b>${lv ? `（波形宽度必须与批次一致；不良点：通带中间比两端低 ≥${lv.u2} dB；不良/烘烤：整体低 ≥${lv.big} dB，或低 ≥${lv.drop} dB 且 ≥${lv.z}σ 且无深凹陷）` : ''} · 其中因波形异常转失效/重测 <b>${sum.ex}</b> 个位置`
       + `<br>口径核对：重算与软件结果不一致 <b>${sum.mismatch}</b> 个位置${sum.mismatch ? '（已逐个在明细中标出）' : ''}`
       + (sum.ef ? `<br><b style="color:#cf222e">EXP 不良 ${sum.ef} 个：AIR 不能覆盖。</b>` : '');
   }
@@ -10147,7 +10147,7 @@ async function dualExportExcel() {
     ['判定来源', dualIgnoreActive() ? '模拟重算（忽略 ' + dualIgnoreText() + '）' : '读数据2.57 汇总文件'],
     ['EXP 规格', dualState.expSpecItem.hash], ['AIR 规格', dualState.airSpecItem.hash],
     ['忽略参数', dualIgnoreActive() ? dualIgnoreText() : '无'],
-    ['异常排除', (ReadDataCore.ANOMALY_LEVELS[dualState.anomalyLevel] || {}).name || '关闭'],
+    ['波形异常处理', (ReadDataCore.ANOMALY_LEVELS[dualState.anomalyLevel] || {}).name || '关闭'],
     ['位置数', dualState.positions.length], ['人工确认', dualState.confirmed ? '已确认' : '未确认'], ['备注', dualState.note]
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), '汇总');
@@ -10156,12 +10156,13 @@ async function dualExportExcel() {
     'AIR CW', 'AIR ΔCW', 'AIR BW@Ripple', 'AIR Ripple', 'AIR MaxIL', 'AIR ISO L', 'AIR ISO R']];
   const anText = s => {
     if (!s.anomaly) return '';
-    if (s.anomaly.manual) return '手动排除';
+    if (s.anomaly.manual) return '手动标记';
     if (s.anomaly.shared) return '同位置另一侧异常';
+    if (s.anomaly.why === 'u') return `中间比两端低 ${s.anomaly.u.toFixed(2)} dB`;
     const seg = [];
     if (isFinite(s.anomaly.drop)) seg.push(`低 ${s.anomaly.drop.toFixed(2)} dB`);
     if (isFinite(s.anomaly.z)) seg.push(`${s.anomaly.z.toFixed(1)}σ`);
-    if (isFinite(s.anomaly.u) && s.anomaly.u >= 0.5) seg.push(`两侧高 ${s.anomaly.u.toFixed(2)} dB`);
+    if (isFinite(s.anomaly.u) && s.anomaly.u >= 0.55) seg.push(`两侧高 ${s.anomaly.u.toFixed(2)} dB`);
     return seg.join(' / ');
   };
   for (const p of dualState.positions) {
