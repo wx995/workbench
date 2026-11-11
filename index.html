@@ -401,7 +401,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.6</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.7</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -947,6 +947,11 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
         <label class="chk-inline">AIR 规格
           <select id="dual-air-spec" class="sel-sm" style="min-width:240px"></select>
         </label>
+        <label class="chk-inline" title="临时改 AIR 的 Ripple 限值做试算：改完立刻重算 EXP/AIR 对比，不影响软件原判；点「还原」回到规格值">
+          AIR Ripple 试算
+          <input type="number" id="dual-air-ripple" class="inp-sm" step="0.05" min="0.1" max="2" style="width:78px">
+        </label>
+        <button class="btn btn-sm" id="dual-air-ripple-reset" title="回到规格里的 Ripple">还原</button>
         <span class="tool-hint" id="dual-stage-label"></span>
       </div>
       <div id="dual-match-table" class="box-note" style="padding:6px 0"></div>
@@ -1415,7 +1420,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.6';
+const VERSION = 'v1.7.7';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9289,13 +9294,14 @@ function exportReportHtml() {
 
 </script>
 <script id="dual-ui">
-/* ===== 双规格一致性 UI v9.1 —— 判定以「读数据 2.57」读出的结果为准 ===== */
+﻿/* ===== 双规格一致性 UI v9.1 —— 判定以「读数据 2.57」读出的结果为准 ===== */
 const dualState = {
   exp: null, air: null,
   expChoices: [], airChoices: [], expSpecItem: null, airSpecItem: null,
   ignore: { iso: false, ripple: false, maxil: false, deltacw: false, passband: false },
   positions: [], selected: null,
   normMode: 'peak', showSpec: true, focus: true,
+  airRippleOverride: null, rippleCompare: null,
   anomalyLevel: 'std', manual: {},
   confirmed: false, note: '',
   manualSpecs: [], chart: null, loading: false
@@ -9320,6 +9326,8 @@ function dualReadText(file) {
     try { r.readAsText(file, 'gbk'); } catch (e) { r.readAsText(file, 'utf-8'); }
   });
 }
+
+function dualSimActive() { return dualIgnoreActive() || dualState.airRippleOverride != null; }
 
 function dualIgnoreActive() {
   return DUAL_IGNORE_KEYS.some(k => dualState.ignore[k]);
@@ -9520,8 +9528,9 @@ function dualSideOf(side, key, spec) {
 }
 
 function dualPickVerdict(s) {
-  if (dualIgnoreActive()) {
-    return { cls: s.re.cls, label: s.reLabel, reason: s.re.reason + '（忽略 ' + dualIgnoreText() + ' 重算）', source: 'recalc' };
+  if (dualSimActive()) {
+    const why = [dualIgnoreText(), dualState.airRippleOverride != null ? ('AIR Ripple ' + dualState.airRippleOverride) : ''].filter(Boolean).join('、');
+    return { cls: s.re.cls, label: s.reLabel, reason: s.re.reason + (why ? '（' + why + ' 重算）' : '（重算）'), source: 'recalc' };
   }
   if (s.soft) return { cls: s.soft.cls, label: s.soft.label, reason: '软件汇总结果', source: 'software' };
   return { cls: s.re.cls, label: s.reLabel, reason: s.re.reason + '（软件汇总无此位置，重算）', source: 'recalc' };
@@ -9538,9 +9547,14 @@ function dualDiffOf(exp, air) {
   return 'pass';
 }
 
-function dualCompute() {
+function dualCompute(opts) {
   const exp = dualState.exp, air = dualState.air;
   if (!exp || !air) return [];
+  const useOverride = !(opts && opts.noOverride);
+  const airSpec = (useOverride && dualState.airRippleOverride != null && dualState.airSpecItem)
+    ? Object.assign({}, dualState.airSpecItem.spec, { Ripple: String(dualState.airRippleOverride) })
+    : (dualState.airSpecItem ? dualState.airSpecItem.spec : null);
+  if (!airSpec) return [];
   const keys = new Set([
     ...Object.keys(exp.summary.cells), ...Object.keys(air.summary.cells),
     ...Object.keys(exp.curves), ...Object.keys(air.curves),
@@ -9551,12 +9565,12 @@ function dualCompute() {
     rows.push({
       key, row: key[0], col: Number(key.slice(1)),
       exp: dualSideOf(exp, key, dualState.expSpecItem.spec),
-      air: dualSideOf(air, key, dualState.airSpecItem.spec)
+      air: dualSideOf(air, key, airSpec)
     });
   }
 
   /* 异常判定以「当前生效的判定」为筛选条件（软件模式用软件结果，模拟模式用重算） */
-  const effCls = s => dualIgnoreActive() ? s.re.cls : (s.soft ? s.soft.cls : s.re.cls);
+  const effCls = s => dualSimActive() ? s.re.cls : (s.soft ? s.soft.cls : s.re.cls);
   const anExp = ReadDataCore.detectAnomalies(rows.map(r => ({
     key: r.key, maxil: r.exp.m && r.exp.m.ok ? r.exp.m.maxilITU : NaN,
     w3: r.exp.m && r.exp.m.ok ? r.exp.m.bw3 : NaN,
@@ -9624,6 +9638,17 @@ const DUAL_LABELS = {
 
 /* ---------- 渲染 ---------- */
 
+function dualCounts(list) {
+  const c = { total: list.length, pass: 0, key: 0, other: 0, rt: 0 };
+  for (const p of list) {
+    if (p.diff === 'pass') c.pass++;
+    else if (p.diff === 'key') c.key++;
+    else c.other++;
+    if (p.diff === 'retest') c.rt++;
+  }
+  return c;
+}
+
 function dualRenderGrid(id, kind) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
@@ -9659,7 +9684,7 @@ function dualFmt(v, d) { return v === null || v === undefined || !isFinite(v) ? 
 
 function dualMetrics(side, kind) {
   /* 软件模式优先用 -Par 里软件自己算出的数值；模拟模式用重算值 */
-  const usePar = !dualIgnoreActive() && side.par;
+  const usePar = !dualSimActive() && side.par;
   const m = side.m;
   if (usePar) {
     return {
@@ -9887,19 +9912,28 @@ function dualRenderSummary() {
   const note = document.getElementById('dual-summary');
   if (note) {
     const eff = sum.total - sum.rt;
-    const src = dualIgnoreActive()
-      ? `<b style="color:#bf8700">模拟：忽略 ${esc(dualIgnoreText())} 后重算</b>`
+    const simParts = [];
+    if (dualIgnoreActive()) simParts.push('忽略 ' + dualIgnoreText());
+    if (dualState.airRippleOverride != null) simParts.push('AIR Ripple ' + dualState.airRippleOverride);
+    const src = dualSimActive()
+      ? `<b style="color:#bf8700">模拟：${esc(simParts.join('、'))} 后重算</b>`
       : '判定来源：软件汇总文件（与软件读取结果一致）';
     note.innerHTML = `${src} · 有效 ${eff}/${sum.total} · 一次合格率 <b>${eff ? (100 * sum.pass / eff).toFixed(1) : '0.0'}%</b>`
       + (sum.key ? `<br><b style="color:#cf222e">重点：${sum.key} 个位置 EXP 不良但 AIR 合格 —— AIR 不能覆盖，优先复核。</b>` : '<br>没有「EXP 不良 / AIR 合格」的位置。')
-      + `<br><span style="color:var(--fg-muted)">其余 ${sum.other} 个：EXP PASS/AIR 烘烤 ${sum.apb} · 其它 EXP 不良 ${sum.ef} · EXP 烘烤 ${sum.eb} · EXP PASS/AIR 不良 ${sum.apf} · 失效/重测 ${sum.rt}（其中波形异常 ${sum.ex}）</span>`;
+      + `<br><span style="color:var(--fg-muted)">其余 ${sum.other} 个：EXP PASS/AIR 烘烤 ${sum.apb} · 其它 EXP 不良 ${sum.ef} · EXP 烘烤 ${sum.eb} · EXP PASS/AIR 不良 ${sum.apf} · 失效/重测 ${sum.rt}（其中波形异常 ${sum.ex}）</span>`
+      + (dualState.rippleCompare ? (() => {
+        const b = dualState.rippleCompare.base, c = dualState.rippleCompare.cur;
+        const d = (x, y) => { const v = y - x; return v ? (v > 0 ? ` → ${y}（+${v}）` : ` → ${y}（${v}）`) : ` → ${y}`; };
+        return `<br><b style="color:#8250df">AIR Ripple 试算 ${esc(dualState.rippleCompare.curRipple)}（原规格 ${esc(dualState.rippleCompare.baseRipple)}）：</b>`
+          + `<span style="color:var(--fg-muted)">一致 PASS ${b.pass}${d(b.pass, c.pass)} · 重点 ${b.key}${d(b.key, c.key)} · 失效/重测 ${b.rt}${d(b.rt, c.rt)}</span>`;
+      })() : '');
   }
   const noteTop = document.getElementById('dual-summary-note');
   if (noteTop) noteTop.textContent = sum.total ? `${sum.total} 个位置` : '未判定';
   const badge = document.getElementById('dual-mode-badge');
   if (badge) {
-    badge.textContent = dualIgnoreActive() ? '模拟（忽略 ' + dualIgnoreText() + '）' : '软件结果';
-    badge.className = 'label ' + (dualIgnoreActive() ? 'label-warn' : 'label-ok');
+    badge.textContent = dualSimActive() ? ('模拟' + (dualState.airRippleOverride != null ? '（AIR Ripple ' + dualState.airRippleOverride + '）' : '（忽略 ' + dualIgnoreText() + '）')) : '软件结果';
+    badge.className = 'label ' + (dualSimActive() ? 'label-warn' : 'label-ok');
   }
   const btn = document.getElementById('btn-dual-export');
   if (btn) btn.disabled = !dualState.confirmed || !sum.total;
@@ -9913,6 +9947,15 @@ function dualRenderAll() {
   if (dualState.selected) dualShowDetail(dualState.selected);
 }
 
+function dualSyncRippleInput() {
+  const inp = document.getElementById('dual-air-ripple');
+  if (!inp) return;
+  const s = dualState.airSpecItem && dualState.airSpecItem.spec;
+  if (!s) { inp.value = ''; return; }
+  inp.placeholder = s.Ripple;
+  inp.value = dualState.airRippleOverride != null ? dualState.airRippleOverride : s.Ripple;
+}
+
 function dualRun() {
   const status = document.getElementById('dual-status');
   dualState.expSpecItem = dualSelectedSpec(document.getElementById('dual-exp-spec'), dualState.expChoices);
@@ -9922,7 +9965,16 @@ function dualRun() {
     if (status) status.textContent = '缺少 EXP 或 AIR 规格：可用「手动选规格文件」加载 .spc';
     dualState.positions = []; dualClearSelection(); dualRenderAll(); return;
   }
+  dualSyncRippleInput();
   dualState.positions = dualCompute();
+  /* AIR Ripple 试算：同时算一遍原规格，给出对比 */
+  if (dualState.airRippleOverride != null && dualState.airSpecItem) {
+    const base = dualCompute({ noOverride: true });
+    dualState.rippleCompare = {
+      base: dualCounts(base), cur: dualCounts(dualState.positions),
+      baseRipple: dualState.airSpecItem.spec.Ripple, curRipple: dualState.airRippleOverride
+    };
+  } else dualState.rippleCompare = null;
   dualState.confirmed = false;
   const cb = document.getElementById('dual-confirm-check');
   if (cb) cb.checked = false;
@@ -9951,6 +10003,7 @@ async function dualApplyFiles(expFiles, airFiles, opts) {
   try {
     dualClearSelection();
     dualState.manual = {};
+    dualState.airRippleOverride = null;
     if (expFiles && expFiles.length) {
       if (status) status.textContent = '正在读取 EXP 曲线…';
       dualState.exp = await dualLoadSide(expFiles, 'exp', relaxed);
@@ -10020,7 +10073,29 @@ function dualInit() {
   });
   ['dual-exp-spec', 'dual-air-spec'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('change', dualRun);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      if (id === 'dual-air-spec') dualState.airRippleOverride = null;
+      dualRun();
+    });
+  });
+
+  /* AIR Ripple 试算 */
+  const ripInp = document.getElementById('dual-air-ripple');
+  if (ripInp) ripInp.addEventListener('change', e => {
+    const s = dualState.airSpecItem && dualState.airSpecItem.spec;
+    if (!s) return;
+    const v = Number(e.target.value);
+    if (!isFinite(v) || v <= 0 || Math.abs(v - Number(s.Ripple)) < 1e-9) dualState.airRippleOverride = null;
+    else dualState.airRippleOverride = v;
+    dualSyncRippleInput();
+    dualRun();
+  });
+  const ripReset = document.getElementById('dual-air-ripple-reset');
+  if (ripReset) ripReset.addEventListener('click', () => {
+    dualState.airRippleOverride = null;
+    dualSyncRippleInput();
+    dualRun();
   });
   for (const k of DUAL_IGNORE_KEYS) {
     const el = document.getElementById('dual-ignore-' + k);
@@ -10219,8 +10294,9 @@ async function dualExportExcel() {
   const wb = XLSX.utils.book_new();
   const meta = [
     ['PN', pn], ['批次', dualState.exp.summary.lotno],
-    ['判定来源', dualIgnoreActive() ? '模拟重算（忽略 ' + dualIgnoreText() + '）' : '读数据2.57 汇总文件'],
+    ['判定来源', dualSimActive() ? ('模拟重算（' + [dualIgnoreActive() ? ('忽略 ' + dualIgnoreText()) : '', dualState.airRippleOverride != null ? ('AIR Ripple ' + dualState.airRippleOverride) : ''].filter(Boolean).join('、') + '）') : '读数据2.57 汇总文件'],
     ['EXP 规格', dualState.expSpecItem.hash], ['AIR 规格', dualState.airSpecItem.hash],
+    ['AIR Ripple', dualState.airRippleOverride != null && dualState.airSpecItem ? (dualState.airRippleOverride + '（原 ' + dualState.airSpecItem.spec.Ripple + '）') : '规格值'],
     ['忽略参数', dualIgnoreActive() ? dualIgnoreText() : '无'],
     ['波形异常处理', (ReadDataCore.ANOMALY_LEVELS[dualState.anomalyLevel] || {}).name || '关闭'],
     ['位置数', dualState.positions.length], ['人工确认', dualState.confirmed ? '已确认' : '未确认'], ['备注', dualState.note]
