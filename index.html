@@ -377,7 +377,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.5</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.5.1</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1390,7 +1390,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.5.0';
+const VERSION = 'v1.5.1';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -10234,7 +10234,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
 
   /* 默认四个 PN：优先用这四类，数据里没有的再用产量前几名补齐 */
-  const DEFAULT_PNS = ['90-20-0027', '90-20-0028', '90-90-0263', '90-10-0007'];
+  const DEFAULT_PNS = ['90-20-0027', '90-20-0028', '90-90-0263', '90-20-0025'];
 
   function dashTopPns(win) {
     const counts = new Map();
