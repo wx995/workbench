@@ -39,8 +39,11 @@ if ($old -eq $new) {
   "已更新 index.html ← $ver（{0:N0} 字节）" -f (Get-Item $dst).Length
 }
 
+$ErrorActionPreference = 'Continue'   # git 会把进度写到 stderr，Stop 会把它当异常
+
 git add -A
-if (-not (git status --porcelain)) { "没有需要提交的改动"; exit 0 }
+$status = git status --porcelain
+if (-not $status) { "没有需要提交的改动"; exit 0 }
 
 $msg = if ($Message) { $Message } else { "更新工作台：$ver" }
 $msgFile = Join-Path $env:TEMP ("wb-commit-{0}.txt" -f [guid]::NewGuid().ToString("N"))
