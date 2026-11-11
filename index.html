@@ -394,7 +394,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.3</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.4</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1409,7 +1409,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.3';
+const VERSION = 'v1.7.4';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9261,11 +9261,15 @@ function exportReportHtml() {
       const z = drop / (1.4826 * madIL);
       /* 平坦塌陷：整体平移、无深凹陷 */
       const flatOk = !isFinite(x.ripple) || x.ripple <= cfg.flat;
-      const byDrop = flatOk && ((drop >= cfg.drop && z >= cfg.z) || drop >= cfg.big);
+      /* 整体远低于批次：只要低到不可能正常工作就算，不看有没有凹陷（A5/A6 这种整条掉到 12~30 dB 的） */
+      const byDrop = (drop >= cfg.big) || (flatOk && drop >= cfg.drop && z >= cfg.z);
       /* 两边高中间低：只看不良点，不要求平坦（U 型本身就是大 ripple） */
       const byU = x.cls === 'FAIL' && isFinite(x.u) && x.u >= cfg.u2;
       if (byDrop || byU) {
-        out[x.key] = { drop, z, u: x.u, mIL, mW, ripple: x.ripple, level, name: cfg.name, why: byU && !byDrop ? 'u' : 'drop' };
+        out[x.key] = {
+          drop, z, u: x.u, mIL, mW, ripple: x.ripple, level, name: cfg.name,
+          why: drop >= cfg.big ? 'big' : (byU ? 'u' : 'drop')
+        };
       }
     }
     return out;
@@ -9551,6 +9555,7 @@ function dualCompute() {
 function dualAnomalyReason(a) {
   const parts = [];
   if (a.why === 'u' && isFinite(a.u)) parts.push(`通带中间比两端低 ${a.u.toFixed(2)} dB（两边高中间低）`);
+  else if (a.why === 'big' && isFinite(a.drop)) parts.push(`通带整体比批次中位低 ${a.drop.toFixed(2)} dB`);
   else {
     if (isFinite(a.drop)) parts.push(`通带比批次中位低 ${a.drop.toFixed(2)} dB`);
     if (isFinite(a.z)) parts.push(`${a.z.toFixed(1)}σ`);
@@ -9621,6 +9626,8 @@ function dualAnomalyLine(s, side) {
   else if (a.shared) txt = `同位置 ${a.other} 判为失效/重测，整点统一处理`;
   else if (a.why === 'u' && isFinite(a.u)) {
     txt = `异常度：通带中间比两端低 <b>${a.u.toFixed(2)} dB</b>（两边高中间低），3dB 宽度 ${a.mW.toFixed(2)} nm 未变`;
+  } else if (a.why === 'big' && isFinite(a.drop)) {
+    txt = `异常度：通带整体比批次中位低 <b>${a.drop.toFixed(2)} dB</b>（批次中位插损 ${a.mIL.toFixed(2)} dB），3dB 宽度 ${a.mW.toFixed(2)} nm 未变`;
   } else {
     const seg = [];
     if (isFinite(a.drop)) seg.push(`比批次中位低 <b>${a.drop.toFixed(2)} dB</b>`);
@@ -9833,7 +9840,7 @@ function dualRenderSummary() {
       ? `<b style="color:#bf8700">当前为模拟：忽略 ${esc(dualIgnoreText())} 后重算</b>`
       : '判定来源：软件汇总文件（-S2.xls / -S2-OSA.xls），与软件读取结果完全一致';
     note.innerHTML = `${src}<br>有效 ${eff}/${sum.total} · 覆盖率 <b>${sum.total ? (100 * eff / sum.total).toFixed(1) : '0.0'}%</b> · 一次合格率 <b>${eff ? (100 * sum.pass / eff).toFixed(1) : '0.0'}%</b>`
-      + `<br>失效/重测判定：<b>${lv ? lv.name : '关闭'}</b>${lv ? `（波形宽度必须与批次一致；不良点：通带中间比两端低 ≥${lv.u2} dB；不良/烘烤：整体低 ≥${lv.big} dB，或低 ≥${lv.drop} dB 且 ≥${lv.z}σ 且无深凹陷）` : ''} · 其中因波形异常转失效/重测 <b>${sum.ex}</b> 个位置`
+      + `<br>失效/重测判定：<b>${lv ? lv.name : '关闭'}</b>${lv ? `（波形宽度必须与批次一致；不良点：通带中间比两端低 ≥${lv.u2} dB；不良/烘烤：整体低 ≥${lv.big} dB（不看凹陷），或低 ≥${lv.drop} dB 且 ≥${lv.z}σ 且无深凹陷）` : ''} · 其中因波形异常转失效/重测 <b>${sum.ex}</b> 个位置`
       + `<br>口径核对：重算与软件结果不一致 <b>${sum.mismatch}</b> 个位置${sum.mismatch ? '（已逐个在明细中标出）' : ''}`
       + (sum.ef ? `<br><b style="color:#cf222e">EXP 不良 ${sum.ef} 个：AIR 不能覆盖。</b>` : '');
   }
@@ -10159,6 +10166,7 @@ async function dualExportExcel() {
     if (s.anomaly.manual) return '手动标记';
     if (s.anomaly.shared) return '同位置另一侧异常';
     if (s.anomaly.why === 'u') return `中间比两端低 ${s.anomaly.u.toFixed(2)} dB`;
+    if (s.anomaly.why === 'big') return `整体低 ${s.anomaly.drop.toFixed(2)} dB`;
     const seg = [];
     if (isFinite(s.anomaly.drop)) seg.push(`低 ${s.anomaly.drop.toFixed(2)} dB`);
     if (isFinite(s.anomaly.z)) seg.push(`${s.anomaly.z.toFixed(1)}σ`);
