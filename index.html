@@ -394,7 +394,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.1</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1410,7 +1410,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.0';
+const VERSION = 'v1.7.1';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -10480,6 +10480,12 @@ document.addEventListener('DOMContentLoaded', dualInit);
 
     const granName = gran === 'month' ? '完整自然月' : gran === 'week' ? '完整自然周' : '最近 7 天';
     const metricOpts = Object.entries(METRICS).map(([k, v]) => `<option value="${k}"${k === metric ? ' selected' : ''}>${v.name}</option>`).join('');
+
+    /* 重写 innerHTML 会销毁图表容器；不先释放旧实例，切粒度/期间后图会画到已删除的 DOM 上（空白） */
+    for (const cid of ['dash-trend', 'dash-trend-delta']) {
+      const old = (typeof state !== 'undefined' && state.charts) ? state.charts[cid] : null;
+      if (old) { try { old.dispose(); } catch (e) { /* ignore */ } delete state.charts[cid]; }
+    }
 
     wrap.innerHTML = `
       <div class="dash-grid">${cards.map(cardHtml).join('')}</div>
