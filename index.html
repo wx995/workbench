@@ -394,7 +394,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.4</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.5</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -926,13 +926,13 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
       <span class="label label-neutral" id="dual-status">未导入</span>
       <div class="box-actions">
         <button class="btn btn-primary btn-sm" id="btn-dual-root">选择产品文件夹</button>
-        <button class="btn btn-sm" id="btn-dual-exp">手动选 EXP 数据</button>
-        <button class="btn btn-sm" id="btn-dual-air">手动选 AIR 数据</button>
+        <button class="btn btn-sm" id="btn-dual-exp" title="单独导入 EXP 侧：选该侧数据所在文件夹即可，不要求命名">手动选 EXP 数据</button>
+        <button class="btn btn-sm" id="btn-dual-air" title="单独导入 AIR 侧：选该侧数据所在文件夹即可，不要求命名">手动选 AIR 数据</button>
         <button class="btn btn-sm" id="btn-dual-spec">手动选规格文件</button>
       </div>
     </div>
     <div class="box-body">
-      <div class="box-note" style="padding:0 0 8px">默认自动识别产品目录下的 S2（EXP）和 S2-OSA（AIR），S1 不参与。<b>判定直接采用「读数据 2.57」写出的汇总文件结果</b>（-S2.xls / -S2-OSA.xls），曲线与参数用于核对和查看；只有勾选“忽略参数”时才改为重算模拟。软件重新跑过之后，重新选一次文件夹即可同步。</div>
+      <div class="box-note" style="padding:0 0 8px">默认自动识别产品目录下的 S2（EXP）/ S2-OSA（AIR）；识别不到时，用「手动选 EXP 数据」「手动选 AIR 数据」分别选各自的文件夹即可 —— 目录和文件<b>不要求</b>带 EXP / AIR / S2 字样，只要有 A1.xls 这类曲线或软件汇总文件。S1 不参与。<b>判定直接采用「读数据 2.57」写出的汇总文件结果</b>（-S2.xls / -S2-OSA.xls），曲线与参数用于核对和查看；只有勾选“忽略参数”时才改为重算模拟。软件重新跑过之后，重新选一次文件夹即可同步。</div>
       <div class="chart-tools">
         <label class="chk-inline">EXP 规格
           <select id="dual-exp-spec" class="sel-sm" style="min-width:240px"></select>
@@ -1409,7 +1409,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.4';
+const VERSION = 'v1.7.5';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9324,29 +9324,51 @@ function dualIgnoreText() {
 
 /* ---------- 读取 ---------- */
 
-function dualStageName(files, kind) {
-  const names = new Set();
-  for (const f of files) {
-    const path = String(f.webkitRelativePath || f.name);
-    const parts = path.split('/');
-    for (const p of parts) {
-      if (kind === 'air') { if (/S2[_-]?OSA$/i.test(p) || /OSA$/i.test(p)) names.add(p); }
-      else if (/^S2$/i.test(p) || (/S2$/i.test(p) && !/OSA/i.test(p))) names.add(p);
-    }
-    const m = path.match(/([^/\\]+?-S2-OSA)(?=[-._/]|$)/i) || (kind === 'exp' ? path.match(/([^/\\]+?-S2)(?=[-._/]|$)/i) : null);
-    if (m && !(kind === 'exp' && /OSA/i.test(m[1]))) names.add(m[1]);
-  }
-  return Array.from(names).sort((a, b) => a.length - b.length)[0] || '';
+function dualDirOf(f) {
+  const path = String(f.webkitRelativePath || f.name);
+  const i = path.lastIndexOf('/');
+  return i >= 0 ? path.slice(0, i) : '';
+}
+function dualBaseOf(dir) {
+  const parts = String(dir).split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+/* 位置文件名：A1.xls / xxx-A1.xls / xxx_A1.xls / xxx A01.xls */
+function dualPosOf(name) {
+  const m = String(name).match(/(?:^|[-_\s])([A-J])(\d{1,2})\.xls$/i);
+  return m ? m[1].toUpperCase() + Number(m[2]) : null;
+}
+function dualParPosOf(name) {
+  const m = String(name).match(/(?:^|[-_\s])([A-J])(\d{1,2})-Par\.xls$/i);
+  return m ? m[1].toUpperCase() + Number(m[2]) : null;
 }
 
-function dualFilesForStage(files, stage) {
-  const isAir = /OSA/i.test(stage);
-  return files.filter(f => {
-    const path = String(f.webkitRelativePath || f.name);
-    const hit = path.split('/').includes(stage) || path.startsWith(stage + '-') || path.startsWith(stage + '.');
-    if (!hit) return false;
-    return isAir ? /OSA/i.test(path) : !/OSA/i.test(path);
+/* 选一侧的数据目录：
+   自动模式优先按 S2 / S2-OSA 命名；
+   手动模式（relaxed）不要求命名，取「曲线文件最多的那个目录」 */
+function dualPickGroup(files, kind, relaxed) {
+  const map = new Map();
+  for (const f of files) {
+    const dir = dualDirOf(f);
+    const g = map.get(dir) || { dir, name: dualBaseOf(dir), files: [] };
+    g.files.push(f);
+    map.set(dir, g);
+  }
+  const groups = Array.from(map.values());
+  const curveCount = g => g.files.filter(f => dualPosOf(f.name)).length;
+  const named = groups.find(g => {
+    if (!curveCount(g)) return false;
+    return kind === 'air' ? /OSA/i.test(g.name) : (/S2/i.test(g.name) && !/OSA/i.test(g.name));
   });
+  if (named) return named;
+  if (!relaxed) return null;
+  const byKind = groups.find(g => {
+    if (!curveCount(g)) return false;
+    return kind === 'air' ? /AIR|OSA/i.test(g.name) : (/EXP/i.test(g.name) && !/OSA/i.test(g.name));
+  });
+  if (byKind) return byKind;
+  const sorted = groups.slice().sort((a, b) => curveCount(b) - curveCount(a));
+  return sorted.length && curveCount(sorted[0]) ? sorted[0] : null;
 }
 
 function dualParseSummary(text) {
@@ -9393,27 +9415,49 @@ function dualParsePar(text) {
   };
 }
 
-async function dualLoadSide(files, kind) {
-  const stage = dualStageName(files, kind);
-  if (!stage) throw new Error(kind === 'air' ? '未找到 S2-OSA / AIR 目录' : '未找到 S2 / EXP 目录');
-  const stageFiles = dualFilesForStage(files, stage);
-  const sumFile = stageFiles.find(f => f.name.replace(/\.xls$/i, '').toLowerCase() === stage.toLowerCase());
-  if (!sumFile) throw new Error('未找到汇总文件 ' + stage + '.xls');
-  const summary = dualParseSummary(await dualReadText(sumFile));
+async function dualLoadSide(files, kind, relaxed) {
+  const group = dualPickGroup(files, kind, relaxed);
+  if (!group) {
+    throw new Error(kind === 'air'
+      ? '没有识别到 AIR 测试文件（需要 A1.xls / xxx-A1.xls 这类曲线）'
+      : '没有识别到 EXP 测试文件（需要 A1.xls / xxx-A1.xls 这类曲线）');
+  }
+  const stage = group.name || (kind === 'air' ? 'AIR' : 'EXP');
+  const stageFiles = group.files;
+
+  /* 汇总文件：优先与目录同名；否则找含 PN/Lotno/Spec 表头的那个；都没有就只用曲线 */
+  let sumFile = stageFiles.find(f => /\.xls$/i.test(f.name) && f.name.replace(/\.xls$/i, '').toLowerCase() === stage.toLowerCase());
+  if (!sumFile) {
+    const cand = stageFiles.filter(f => /\.xls$/i.test(f.name) && !dualParPosOf(f.name) && !dualPosOf(f.name) && !/^original-/i.test(f.name));
+    for (const f of cand) {
+      try {
+        const t = await dualReadText(f);
+        if (/(^|\n)PN\t|(^|\n)Lotno\t|(^|\n)Spec\t/.test(t)) { sumFile = f; break; }
+      } catch (e) { /* ignore */ }
+    }
+  }
+  const summary = sumFile ? dualParseSummary(await dualReadText(sumFile)) : { pn: '', lotno: '', spec: '', cells: {} };
+  if (!summary.pn) {
+    const m = String(stage).toUpperCase().match(/(\d{2}-\d{2}-\d{4}(?:-\d{2}-[0-9A-Z]{4})?)/);
+    if (m) summary.pn = m[1];
+  }
 
   const curves = {};
   for (const f of stageFiles) {
-    const m = f.name.match(/-([A-J])(\d{1,2})\.xls$/i);
-    if (!m) continue;
-    try { curves[m[1] + Number(m[2])] = ReadDataCore.parseCurve(await dualReadText(f)); } catch (e) { /* 单点异常跳过 */ }
+    const pos = dualPosOf(f.name);
+    if (!pos) continue;
+    try { curves[pos] = ReadDataCore.parseCurve(await dualReadText(f)); } catch (e) { /* 单点异常跳过 */ }
   }
   const pars = {};
   for (const f of stageFiles) {
-    const m = f.name.match(/-([A-J])(\d{1,2})-Par\.xls$/i);
-    if (!m) continue;
-    try { pars[m[1] + Number(m[2])] = dualParsePar(await dualReadText(f)); } catch (e) { /* ignore */ }
+    const pos = dualParPosOf(f.name);
+    if (!pos) continue;
+    try { pars[pos] = dualParsePar(await dualReadText(f)); } catch (e) { /* ignore */ }
   }
-  return { stage, summary, curves, pars };
+  if (!Object.keys(curves).length && !Object.keys(summary.cells).length) {
+    throw new Error('目录里没有可识别的测试数据（需要 A1.xls / xxx-A1.xls 曲线，或软件写出的汇总文件）');
+  }
+  return { stage, summary, curves, pars, sumFile: sumFile ? sumFile.name : '' };
 }
 
 function dualFillSpecSelect(sel, choices, selectedHash) {
@@ -9869,7 +9913,7 @@ function dualRun() {
   dualState.airSpecItem = dualSelectedSpec(document.getElementById('dual-air-spec'), dualState.airChoices);
   if (!dualState.exp || !dualState.air) { if (status) status.textContent = '请选择 EXP / AIR 数据目录'; return; }
   if (!dualState.expSpecItem || !dualState.airSpecItem) {
-    if (status) status.textContent = '缺少 EXP 或 AIR 规格';
+    if (status) status.textContent = '缺少 EXP 或 AIR 规格：可用「手动选规格文件」加载 .spc';
     dualState.positions = []; dualClearSelection(); dualRenderAll(); return;
   }
   dualState.positions = dualCompute();
@@ -9895,21 +9939,30 @@ function dualClearSelection() {
   if (box) showEmpty('dual-curve', '点击左侧任意位置后显示 EXP / AIR 两条曲线。');
 }
 
-async function dualApplyFiles(expFiles, airFiles) {
+async function dualApplyFiles(expFiles, airFiles, opts) {
   const status = document.getElementById('dual-status');
+  const relaxed = !!(opts && opts.relaxed);
   try {
     dualClearSelection();
     dualState.manual = {};
     if (expFiles && expFiles.length) {
       if (status) status.textContent = '正在读取 EXP 曲线…';
-      dualState.exp = await dualLoadSide(expFiles, 'exp');
+      dualState.exp = await dualLoadSide(expFiles, 'exp', relaxed);
     }
     if (airFiles && airFiles.length) {
       if (status) status.textContent = '正在读取 AIR 曲线…';
-      dualState.air = await dualLoadSide(airFiles, 'air');
+      dualState.air = await dualLoadSide(airFiles, 'air', relaxed);
     }
-    if (!dualState.exp || !dualState.air) { if (status) status.textContent = '请同时提供 EXP 和 AIR 数据'; return; }
-    dualPopulateSpecs(dualState.exp.summary.pn);
+    if (!dualState.exp || !dualState.air) {
+      const e = dualState.exp, a = dualState.air;
+      if (status) {
+        if (e && !a) status.textContent = `已读取 EXP：${Object.keys(e.curves).length} 个位置（${e.summary.pn || 'PN 未知'}），请再选择 AIR 数据`;
+        else if (a && !e) status.textContent = `已读取 AIR：${Object.keys(a.curves).length} 个位置（${a.summary.pn || 'PN 未知'}），请再选择 EXP 数据`;
+        else status.textContent = '请分别选择 EXP 和 AIR 数据';
+      }
+      return;
+    }
+    dualPopulateSpecs(dualState.exp.summary.pn || dualState.air.summary.pn);
     dualRun();
   } catch (e) {
     if (status) status.textContent = '解析失败：' + e.message;
@@ -9938,8 +9991,8 @@ function dualInit() {
     const files = Array.from(e.target.files || []); e.target.value = '';
     dualApplyFiles(files, files);
   });
-  expIn.addEventListener('change', e => { const f = Array.from(e.target.files || []); e.target.value = ''; dualApplyFiles(f, null); });
-  airIn.addEventListener('change', e => { const f = Array.from(e.target.files || []); e.target.value = ''; dualApplyFiles(null, f); });
+  expIn.addEventListener('change', e => { const f = Array.from(e.target.files || []); e.target.value = ''; dualApplyFiles(f, null, { relaxed: true }); });
+  airIn.addEventListener('change', e => { const f = Array.from(e.target.files || []); e.target.value = ''; dualApplyFiles(null, f, { relaxed: true }); });
   specIn.addEventListener('change', async e => {
     const files = Array.from(e.target.files || []); e.target.value = '';
     for (const f of files) {
