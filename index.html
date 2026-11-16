@@ -401,7 +401,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.7</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 良率看板 · v1.7.8</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1420,7 +1420,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.7.7';
+const VERSION = 'v1.7.8';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -9252,9 +9252,9 @@ function exportReportHtml() {
   }
   const ANOMALY_LEVELS = {
     off: null,
-    loose: { drop: 1.5, z: 3.0, big: 4.0, u2: 0.55, w3: 0.25, flat: 1.0, name: '宽松' },
-    std: { drop: 2.5, z: 3.0, big: 6.0, u2: 0.70, w3: 0.25, flat: 1.0, name: '标准' },
-    strict: { drop: 3.5, z: 4.0, big: 9.0, u2: 0.90, w3: 0.25, flat: 1.0, name: '严格' }
+    loose: { drop: 1.5, z: 3.0, big: 4.0, u2: 0.55, uDrop: 3.0, w3: 0.25, flat: 1.0, name: '宽松' },
+    std: { drop: 2.5, z: 3.0, big: 6.0, u2: 0.70, uDrop: 3.0, w3: 0.25, flat: 1.0, name: '标准' },
+    strict: { drop: 3.5, z: 4.0, big: 9.0, u2: 0.90, uDrop: 3.0, w3: 0.25, flat: 1.0, name: '严格' }
   };
   function detectAnomalies(items, level) {
     const cfg = ANOMALY_LEVELS[level];
@@ -9274,8 +9274,9 @@ function exportReportHtml() {
       const flatOk = !isFinite(x.ripple) || x.ripple <= cfg.flat;
       /* 整体远低于批次：只要低到不可能正常工作就算，不看有没有凹陷（A5/A6 这种整条掉到 12~30 dB 的） */
       const byDrop = (drop >= cfg.big) || (flatOk && drop >= cfg.drop && z >= cfg.z);
-      /* 两边高中间低：只看不良点，不要求平坦（U 型本身就是大 ripple） */
-      const byU = x.cls === 'FAIL' && isFinite(x.u) && x.u >= cfg.u2;
+      /* 两边高中间低：只看不良点，不要求平坦（U 型本身就是大 ripple）；
+         但整体电平必须也明显偏低，否则只是「正常电平 + 纹波大」的产品不良，不该算失效 */
+      const byU = x.cls === 'FAIL' && isFinite(x.u) && x.u >= cfg.u2 && drop >= cfg.uDrop;
       if (byDrop || byU) {
         out[x.key] = {
           drop, z, u: x.u, mIL, mW, ripple: x.ripple, level, name: cfg.name,
