@@ -405,6 +405,7 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 .wo-kind{font-size:11px;padding:1px 6px;border-radius:8px;color:#fff}
 .wo-bad{background:#cf222e}.wo-ok{background:#1a7f37}.wo-dim{background:#8c959f}
 .wo-dim2{font-size:10px;color:var(--fg-muted);margin-top:2px}
+.wo-chk{font-size:11px;line-height:1.55;color:var(--fg-muted)}
 .wo-ops{white-space:nowrap}
 .wo-ops .btn{margin:0 0 4px 4px}
 .wo-cand-head{font-size:12px;color:var(--fg-muted);margin:14px 0 6px}
@@ -438,7 +439,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.11.2</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.11.3</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1510,7 +1511,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.11.2';
+const VERSION = 'v1.11.3';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -11154,22 +11155,13 @@ document.addEventListener('DOMContentLoaded', dualInit);
       <th>工单</th><th>炉号</th><th>PN</th><th>一体机NG</th><th>抽测结果</th><th>数据核对（当前数据）</th><th class="num">良率</th><th></th></tr></thead><tbody>`;
     for (const r of list) {
       const lk = woLookup(r);
-      const st = KIND_STYLE[lk.kind] || KIND_STYLE.none;
-      /* 核对标签按数据实际剩下的项来写：仍有 NG / 仍有 波长长 / 仍有 NG、波长长 */
-      let kindLabel = st.label;
-      if (lk.agg) {
-        const still = [];
-        if (lk.agg.ng > 0) still.push('NG');
-        if (lk.agg.wl > 0) still.push('波长长');
-        kindLabel = still.length ? ('仍有 ' + still.join('、')) : '已无 NG / 波长长';
-      }
       h += `<tr class="wo-row${woSelected === r.id ? ' on' : ''}" data-wo-id="${esc2(r.id)}">
         <td><b>${esc2(r.order || '')}</b>${r.note ? `<div class="wo-dim2">${esc2(r.note)}</div>` : ''}</td>
         <td>${esc2(r.furnace || '')}</td>
         <td>${esc2(r.pn || '')}</td>
         <td><span class="wo-res wr-m-${esc2(r.machineNg)}">${esc2(r.machineNg || '')}</span></td>
         <td><span class="wo-res wr-${esc2(r.sample)}">${esc2(r.sample || '')}</span></td>
-        <td><span class="wo-kind ${st.cls}">${esc2(kindLabel)}</span><div class="wo-dim2">${esc2(lk.text || '')}</div></td>
+        <td><div class="wo-chk">${esc2(lk.text || '')}</div></td>
         <td class="num">${lk.agg ? `<b>${pct(lk.agg.rate, 1)}</b>` : '—'}</td>
         <td class="wo-ops"><button class="btn btn-sm" data-wo-act="del">删除</button></td>
       </tr>`;
