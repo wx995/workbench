@@ -433,7 +433,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.9</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.9.1</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1499,7 +1499,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.9.0';
+const VERSION = 'v1.9.1';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -11288,7 +11288,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
             createdAt: ci.createdAt >= 0 ? woDate(r[ci.createdAt]) : ''
           });
         }
-        if (!list.length) throw new Error('没有读到有效行');
+        if (!list.length) { toast('Excel 里还没有登记行（只有表头）', 'warn'); return; }
         woMerge(list);
       } catch (e) { toast('导入失败：' + e.message, 'error'); }
     };
