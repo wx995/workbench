@@ -426,6 +426,11 @@ details.spec-item[open] summary{background:var(--bg-subtle)}
 tr.wo-row{cursor:pointer}
 tr.wo-row.on td{background:rgba(9,105,218,.07)}
 </style>
+<style>
+.wr-m-NG{background:#cf222e}.wr-m-OK{background:#1a7f37}.wr-m-待定{background:#8c959f}
+.wo-preview{font-size:11px;color:var(--fg-muted);min-height:16px;margin:2px 0 8px}
+.wo-form .inp-sm{height:26px}
+</style>
 </head>
 <body>
 
@@ -433,7 +438,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.9.1</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.10.1</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -1126,41 +1131,44 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <h3>异常工单记录</h3>
       <span class="label label-neutral" id="wo-count">0 条</span>
       <div class="box-actions">
-        <button class="btn btn-sm" id="wo-gen">生成候选（当前数据）</button>
         <button class="btn btn-primary btn-sm" id="wo-export" title="导出为 Excel，可直接在 Excel 里登记">导出记录（Excel）</button>
-        <button class="btn btn-sm" id="wo-import" title="读回 Excel / JSON，按 ID 合并">导入记录</button>
+        <button class="btn btn-sm" id="wo-import" title="读回 Excel / JSON，按 ID 或工单合并">导入记录</button>
       </div>
     </div>
     <div class="box-body">
-      <div class="box-note" style="padding:0 0 8px">登记 <b>工单 + 烘烤次数 + 结果</b>；点某一行，下面自动列出这个工单的良率、一体机、测试时间和分析。记录先存在本机浏览器，用「导出记录（Excel）」长期保存（建议 <code>D:\Desktop\02_测试与数据处理\数据处理\异常工单记录.xlsx</code>），在 Excel 里改完再导入回来。</div>
+      <div class="box-note" style="padding:0 0 8px">只需填 <b>工单</b>，炉号和 PN 会自动从当前良率数据带出（可改）；再选 <b>一体机NG</b> 和 <b>抽测结果</b>。点某一行，下面列出该工单的良率、一体机、测试时间和分析。建议存成 <code>D:\Desktop\02_测试与数据处理\数据处理\异常工单记录.xlsx</code>。</div>
       <div class="chart-toolbar wo-form">
-        <label class="chk-inline">工单 <input type="text" id="wo-f-order" class="inp-sm" style="width:190px" placeholder="T08119+Y626071"></label>
-        <label class="chk-inline">烘烤次数 <select id="wo-f-bake" class="sel-sm"></select></label>
-        <label class="chk-inline">结果 <select id="wo-f-result" class="sel-sm"></select></label>
-        <label class="chk-inline">备注 <input type="text" id="wo-f-note" class="inp-sm" style="width:220px" placeholder="可选"></label>
+        <label class="chk-inline">工单 <input type="text" id="wo-f-order" class="inp-sm" style="width:180px" placeholder="T08119+Y626071"></label>
+        <label class="chk-inline">炉号 <input type="text" id="wo-f-furnace" class="inp-sm" style="width:130px" placeholder="自动带出"></label>
+        <label class="chk-inline">PN <input type="text" id="wo-f-pn" class="inp-sm" style="width:170px" placeholder="自动带出"></label>
+        <label class="chk-inline">一体机NG <select id="wo-f-machine" class="sel-sm"></select></label>
+        <label class="chk-inline">抽测结果 <select id="wo-f-sample" class="sel-sm"></select></label>
+        <label class="chk-inline">备注 <input type="text" id="wo-f-note" class="inp-sm" style="width:180px" placeholder="可选"></label>
         <button class="btn btn-primary btn-sm" id="wo-f-add">添加记录</button>
       </div>
+      <div id="wo-f-preview" class="wo-preview"></div>
       <div class="chart-toolbar">
-        <label class="chk-inline">结果
+        <label class="chk-inline">筛选
           <select id="wo-filter" class="sel-sm">
             <option value="全部">全部</option>
-            <option value="PASS">PASS</option>
             <option value="NG">NG</option>
+            <option value="PASS">PASS</option>
             <option value="波长长">波长长</option>
             <option value="烘烤">烘烤</option>
-            <option value="其他">其他</option>
+            <option value="OK">OK</option>
+            <option value="待定">待定</option>
           </select>
         </label>
-        <label class="chk-inline">搜索 <input type="text" id="wo-search" class="inp-sm" style="width:180px" placeholder="工单 / 烘烤次数 / 备注"></label>
+        <label class="chk-inline">搜索 <input type="text" id="wo-search" class="inp-sm" style="width:180px" placeholder="工单 / 炉号 / PN / 备注"></label>
         <input type="file" id="wo-import-input" accept=".xlsx,.xls,.json" hidden>
-        <span class="tool-hint">「数据核对」用当前良率数据回查同一工单（同一烘烤次数）</span>
+        <span class="tool-hint">「数据核对」用当前良率数据回查同一工单</span>
       </div>
       <div id="wo-body"><div class="empty-hint">还没有记录。</div></div>
       <div id="wo-detail" class="wo-detail"></div>
-      <div id="wo-candidates"></div>
     </div>
   </div>
 </section>
+
 
 
 </main>
@@ -1499,7 +1507,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.9.1';
+const VERSION = 'v1.10.1';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -10915,14 +10923,14 @@ document.addEventListener('DOMContentLoaded', dualInit);
 </script>
 
 <script id="orders-ui">
-/* ===== 异常工单记录 v1.9 =====
-   登记：工单 + 烘烤次数 + 结果（PASS/NG/波长长/烘烤/其他）+ 备注
-   分析：从当前良率数据里按 工单(+烘烤次数) 取明细，算良率/NG/波长长/一体机/日期，并给结论
+﻿/* ===== 异常工单记录 v1.10 =====
+   登记：工单（炉号 / PN 自动从当前良率数据带出，可改）+ 一体机NG + 抽测结果 + 备注
+   分析：点一行，按工单取良率/一体机/测试时间明细并给结论
    存储：localStorage；导出/导入 Excel（异常工单记录.xlsx） */
 (function (global) {
   const LSK = 'wb-wo-records';
-  const RESULTS = ['PASS', 'NG', '波长长', '烘烤', '其他'];
-  const BAKES = ['', 'OK', '1HT', '2HT', '3HT', '4HT', '5HT', 'HT'];
+  const MACHINE = ['NG', 'OK', '待定'];
+  const SAMPLE = ['PASS', 'NG', '波长长', '烘烤', '其他'];
 
   function woAll() {
     try {
@@ -10931,30 +10939,20 @@ document.addEventListener('DOMContentLoaded', dualInit);
     } catch (e) { return []; }
   }
   function woSave(list) {
-    localStorage.setItem(LSK, JSON.stringify({ version: 2, updatedAt: new Date().toISOString(), records: list }));
+    localStorage.setItem(LSK, JSON.stringify({ version: 3, updatedAt: new Date().toISOString(), records: list }));
   }
   function nowIso() { return new Date().toISOString(); }
   function esc2(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
   function pct(v, d) { return v === null || !isFinite(v) ? '—' : fmtPct(v, d === undefined ? 2 : d); }
-  function bakeOf(v) {
-    const s = String(v || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!s) return '';
-    if (s === 'OK') return 'OK';
-    if (s === 'HT') return 'HT';
-    const m = s.match(/^(\d{1,2})HT/);
-    return m ? (Number(m[1]) + 'HT') : s;
-  }
 
-  /* ---------- 按工单(+烘烤次数)从良率数据里取明细 ---------- */
+  /* ---------- 按工单取明细 ---------- */
   function woLookup(rec) {
     const d = state.yieldData;
     if (!d || !d.rows || !d.rows.length) return { kind: 'nodata', text: '未导入良率数据' };
     const order = String(rec.order || '').trim();
     if (!order) return { kind: 'none', text: '工单号为空' };
-    const bake = bakeOf(rec.bake);
-    let rows = d.rows.filter(r => String(r.工单 || '').trim() === order);
-    if (bake) rows = rows.filter(r => bakeOf(r.烘烤次数) === bake);
-    if (!rows.length) return { kind: 'none', text: bake ? '当前数据无此工单 + 烘烤次数' : '当前数据无此工单' };
+    const rows = d.rows.filter(r => String(r.工单 || '').trim() === order);
+    if (!rows.length) return { kind: 'none', text: '当前数据无此工单' };
 
     const agg = { total: 0, ok: 0, ng: 0, wl: 0, retest: 0, bakeD: 0, d0: '', d1: '', n: rows.length };
     const machines = new Map(), days = new Map(), furn = new Set(), pn = new Set();
@@ -10978,7 +10976,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
     agg.wlRate = agg.total ? agg.wl / agg.total : null;
     const kind = agg.ng > 0 ? 'hasNg' : (agg.wl > 0 ? 'hasWl' : (agg.ok > 0 ? 'clean' : 'empty'));
     return {
-      kind, agg, bake,
+      kind, agg,
       machines: Array.from(machines.entries()).map(([k, v]) => ({ k, ...v, rate: v.total ? v.ok / v.total : null })).sort((a, b) => b.total - a.total),
       days: Array.from(days.entries()).map(([k, v]) => ({ k, ...v, rate: v.total ? v.ok / v.total : null })).sort((a, b) => a.k.localeCompare(b.k)),
       furnaces: Array.from(furn), pns: Array.from(pn),
@@ -10996,13 +10994,15 @@ document.addEventListener('DOMContentLoaded', dualInit);
 
   function woCompareText(rec, lk) {
     if (!lk || lk.kind === 'nodata' || lk.kind === 'none') return '';
-    if (rec.result === 'PASS' && lk.kind === 'hasNg') return '记录 PASS，但数据里仍有 NG —— 需复核';
-    if (rec.result === 'PASS' && lk.kind === 'hasWl') return '记录 PASS，但数据里还有波长长';
-    if ((rec.result === 'NG' || rec.result === '波长长') && lk.kind === 'clean') return '记录为异常，但当前数据已无 NG/波长长 —— 可能已转好';
+    const s = rec.sample;
+    if (s === 'PASS' && lk.kind === 'hasNg') return '抽测记 PASS，但数据里仍有 NG —— 需复核';
+    if (s === 'PASS' && lk.kind === 'hasWl') return '抽测记 PASS，但数据里还有波长长';
+    if ((s === 'NG' || s === '波长长') && lk.kind === 'clean') return `抽测记 ${s}，但当前数据已无 NG/波长长 —— 可能已转好`;
+    if (rec.machineNg === 'NG' && lk.kind === 'clean') return '一体机记 NG，但当前数据已无 NG';
+    if (rec.machineNg === 'OK' && lk.kind === 'hasNg') return '一体机记 OK，但数据里有 NG';
     return '';
   }
 
-  /* 自动分析：2~4 句 */
   function woAnalyze(rec, lk) {
     if (!lk || !lk.agg || !lk.agg.total) return [];
     const a = lk.agg, out = [];
@@ -11037,27 +11037,28 @@ document.addEventListener('DOMContentLoaded', dualInit);
     const filter = (document.getElementById('wo-filter') || {}).value || '全部';
     const q = String((document.getElementById('wo-search') || {}).value || '').trim().toUpperCase();
     const list = all.filter(r => {
-      if (filter !== '全部' && r.result !== filter) return false;
+      if (filter !== '全部' && r.sample !== filter && r.machineNg !== filter) return false;
       if (!q) return true;
-      return [r.order, r.bake, r.note].some(x => String(x || '').toUpperCase().includes(q));
+      return [r.order, r.furnace, r.pn, r.note].some(x => String(x || '').toUpperCase().includes(q));
     });
     const cnt = document.getElementById('wo-count');
     if (cnt) cnt.textContent = `${all.length} 条`;
-
     if (!list.length) {
-      wrap.innerHTML = '<div class="empty-hint">还没有记录。上面填工单 + 烘烤次数 + 结果后点「添加记录」，或从候选里加入。</div>';
+      wrap.innerHTML = '<div class="empty-hint">还没有记录。上面填工单（炉号 / PN 会自动带出），选一体机NG 和 抽测结果，点「添加记录」。</div>';
       renderDetail(null);
       return;
     }
     let h = `<div class="tbl-wrap" style="max-height:460px"><table class="tbl wo-table"><thead><tr>
-      <th>工单</th><th>烘烤次数</th><th>记录结果</th><th>数据核对（当前数据）</th><th class="num">良率</th><th></th></tr></thead><tbody>`;
+      <th>工单</th><th>炉号</th><th>PN</th><th>一体机NG</th><th>抽测结果</th><th>数据核对（当前数据）</th><th class="num">良率</th><th></th></tr></thead><tbody>`;
     for (const r of list) {
       const lk = woLookup(r);
       const st = KIND_STYLE[lk.kind] || KIND_STYLE.none;
-      h += `<tr class="wo-row${dualStateOrderSelected === r.id ? ' on' : ''}" data-wo-id="${esc2(r.id)}">
+      h += `<tr class="wo-row${woSelected === r.id ? ' on' : ''}" data-wo-id="${esc2(r.id)}">
         <td><b>${esc2(r.order || '')}</b>${r.note ? `<div class="wo-dim2">${esc2(r.note)}</div>` : ''}</td>
-        <td>${esc2(r.bake || '全部')}</td>
-        <td><span class="wo-res wr-${esc2(r.result)}">${esc2(r.result || '')}</span></td>
+        <td>${esc2(r.furnace || '')}</td>
+        <td>${esc2(r.pn || '')}</td>
+        <td><span class="wo-res wr-m-${esc2(r.machineNg)}">${esc2(r.machineNg || '')}</span></td>
+        <td><span class="wo-res wr-${esc2(r.sample)}">${esc2(r.sample || '')}</span></td>
         <td><span class="wo-kind ${st.cls}">${st.label}</span><div class="wo-dim2">${esc2(lk.text || '')}</div></td>
         <td class="num">${lk.agg ? `<b>${pct(lk.agg.rate, 1)}</b>` : '—'}</td>
         <td class="wo-ops"><button class="btn btn-sm" data-wo-act="del">删除</button></td>
@@ -11067,7 +11068,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
     wrap.innerHTML = h;
   }
 
-  var dualStateOrderSelected = null;
+  var woSelected = null;
 
   function renderDetail(id) {
     const box = document.getElementById('wo-detail');
@@ -11078,8 +11079,9 @@ document.addEventListener('DOMContentLoaded', dualInit);
     if (!lk.agg) { box.innerHTML = `<div class="empty-hint">${esc2(lk.text || '无数据')}</div>`; return; }
     const a = lk.agg;
     const lines = woAnalyze(rec, lk);
-    let h = `<div class="wo-detail-head"><b>${esc2(rec.order)}</b> · 烘烤 ${esc2(rec.bake || '全部')} · 记录结果 ${esc2(rec.result)}`
-      + ` · ${esc2(lk.pns.join(' / ') || 'PN 未知')} · 炉号 ${esc2(lk.furnaces.slice(0, 4).join('/') || '—')}</div>`;
+    let h = `<div class="wo-detail-head"><b>${esc2(rec.order)}</b> · 炉号 ${esc2(rec.furnace || lk.furnaces.join('/') || '—')}`
+      + ` · ${esc2(rec.pn || lk.pns.join(' / ') || 'PN 未知')}`
+      + ` · 一体机NG ${esc2(rec.machineNg || '—')} · 抽测 ${esc2(rec.sample || '—')}</div>`;
     h += `<div class="wo-kpis">
       ${kpi('测试总数', a.total.toLocaleString())}
       ${kpi('良率', pct(a.rate, 1))}
@@ -11108,91 +11110,75 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
   function kpi(l, v) { return `<div class="wo-kpi"><div class="k">${esc2(l)}</div><div class="v">${esc2(v)}</div></div>`; }
 
-  /* ---------- 候选：当前数据里 NG / 波长长 > 0 的 工单+烘烤次数 ---------- */
-  function woCandidates() {
-    const d = state.yieldData;
-    const box = document.getElementById('wo-candidates');
-    if (!box) return;
-    if (!d || !d.rows || !d.rows.length) {
-      box.innerHTML = '<div class="empty-hint">先在「良率分析」导入产量登记表，才能自动生成候选。</div>';
-      return;
+  /* ---------- 新增 ---------- */
+  function woAutofill() {
+    const inp = document.getElementById('wo-f-order');
+    const fEl = document.getElementById('wo-f-furnace');
+    const pEl = document.getElementById('wo-f-pn');
+    const prev = document.getElementById('wo-f-preview');
+    const order = String(inp.value || '').trim();
+    if (!order) { if (prev) prev.textContent = ''; return; }
+    const lk = woLookup({ order });
+    if (lk.agg) {
+      if (fEl && !fEl.dataset.touched) fEl.value = lk.furnaces.join('/');
+      if (pEl && !pEl.dataset.touched) pEl.value = lk.pns.join('/');
+      if (prev) prev.textContent = '数据里：' + lk.text;
+    } else {
+      if (prev) prev.textContent = lk.text || '当前数据里没有这个工单';
     }
-    const map = new Map();
-    for (const r of d.rows) {
-      const order = String(r.工单 || '').trim();
-      if (!order) continue;
-      const bake = bakeOf(r.烘烤次数);
-      const key = order + '|' + bake;
-      const x = map.get(key) || { order, bake, total: 0, ok: 0, ng: 0, wl: 0, d0: r.date, d1: r.date };
-      x.total += r.总数; x.ok += r.良品; x.ng += r.NG || 0; x.wl += r.波长长J || 0;
-      if (r.date < x.d0) x.d0 = r.date;
-      if (r.date > x.d1) x.d1 = r.date;
-      map.set(key, x);
-    }
-    const known = new Set(woAll().map(r => String(r.order).trim() + '|' + bakeOf(r.bake)));
-    const list = Array.from(map.values())
-      .filter(x => (x.ng > 0 || x.wl > 0) && !known.has(x.order + '|' + x.bake))
-      .sort((a, b) => (b.ng + b.wl) - (a.ng + a.wl))
-      .slice(0, 50);
-    if (!list.length) { box.innerHTML = '<div class="empty-hint">当前数据里没有未记录的 NG / 波长长 工单。</div>'; return; }
-    let h = `<div class="wo-cand-head">当前数据里的异常（未记录）：${list.length} 个，点「加入」即可登记</div>`;
-    h += '<div class="tbl-wrap" style="max-height:300px"><table class="tbl wo-table"><thead><tr><th>工单</th><th>烘烤次数</th><th class="num">总数</th><th class="num">NG</th><th class="num">波长长</th><th>日期</th><th></th></tr></thead><tbody>';
-    for (const x of list) {
-      h += `<tr><td><b>${esc2(x.order)}</b></td><td>${esc2(x.bake || '（空）')}</td>
-        <td class="num">${x.total.toLocaleString()}</td><td class="num">${x.ng.toLocaleString()}</td>
-        <td class="num">${x.wl.toLocaleString()}</td><td>${x.d0}~${x.d1}</td>
-        <td><button class="btn btn-sm" data-wo-add="${esc2(x.order)}" data-wo-bake="${esc2(x.bake)}">加入</button></td></tr>`;
-    }
-    h += '</tbody></table></div>';
-    box.innerHTML = h;
   }
 
-  function woAdd(order, bake, result, note) {
+  function woAdd(order, furnace, pn, machineNg, sample, note) {
     order = String(order || '').trim();
     if (!order) { toast('请填工单号', 'warn'); return; }
     const all = woAll();
-    if (all.some(r => String(r.order).trim() === order && bakeOf(r.bake) === bakeOf(bake))) {
-      toast('这个工单 + 烘烤次数已经记录过了', 'warn'); return;
-    }
+    if (all.some(r => String(r.order).trim() === order)) { toast('这个工单已经记录过了', 'warn'); return; }
+    const lk = woLookup({ order });
     const rec = {
-      id: 'wo_' + order + '_' + bakeOf(bake) + '_' + Date.now(),
-      order, bake: bakeOf(bake), result: result || 'NG', note: note || '',
+      id: 'wo_' + order + '_' + Date.now(),
+      order,
+      furnace: String(furnace || '').trim() || (lk.furnaces || []).join('/'),
+      pn: String(pn || '').trim() || (lk.pns || []).join('/'),
+      machineNg: MACHINE.includes(machineNg) ? machineNg : '待定',
+      sample: SAMPLE.includes(sample) ? sample : 'NG',
+      note: note || '',
       date: new Date().toISOString().slice(0, 10),
       createdAt: nowIso(), updatedAt: nowIso(),
-      history: [{ at: nowIso(), action: '记录', result: result || 'NG' }]
+      history: [{ at: nowIso(), action: '记录', machineNg, sample }]
     };
     all.unshift(rec); woSave(all);
-    renderOrders(); woCandidates();
-    dualStateOrderSelected = rec.id; renderDetail(rec.id);
-    toast('已记录 ' + order + (rec.bake ? ' / ' + rec.bake : ''), 'success');
+    renderOrders();
+    woSelected = rec.id; renderDetail(rec.id);
+    toast('已记录 ' + order, 'success');
   }
 
   function woDelete(id) {
     woSave(woAll().filter(r => r.id !== id));
-    if (dualStateOrderSelected === id) dualStateOrderSelected = null;
-    renderOrders(); renderDetail(null); woCandidates();
+    if (woSelected === id) woSelected = null;
+    renderOrders(); renderDetail(null);
   }
 
   /* ---------- Excel ---------- */
-  const HEAD = ['ID', '工单', '烘烤次数', '记录结果', '备注', '记录时间', '更新时间'];
+  const HEAD = ['ID', '工单', '炉号', 'PN', '一体机NG', '抽测结果', '备注', '记录时间', '更新时间'];
 
   async function woExport() {
     const all = woAll();
-    const rows = all.map(r => [r.id, r.order, r.bake || '', r.result, r.note || '', r.createdAt || '', r.updatedAt || '']);
+    const rows = all.map(r => [r.id, r.order, r.furnace || '', r.pn || '', r.machineNg || '', r.sample || '', r.note || '', r.createdAt || '', r.updatedAt || '']);
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([HEAD].concat(rows));
-    ws['!cols'] = [{ wch: 34 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 30 }, { wch: 22 }, { wch: 22 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 30 }, { wch: 22 }, { wch: 22 }];
     XLSX.utils.book_append_sheet(wb, ws, '异常工单');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['列', '说明'],
       ['ID', '留空自动生成；已有行请勿改，用于导入时合并'],
-      ['工单', '必填，例如 T08119+Y626071'],
-      ['烘烤次数', 'OK / 1HT / 2HT … / HT，留空表示该工单全部烘焙次数'],
-      ['记录结果', RESULTS.join(' / ')],
+      ['工单', '必填；炉号 / PN 可以在页面里自动带出，也可以直接在这填'],
+      ['炉号 / PN', '可空，页面导入后会自动按工单回填'],
+      ['一体机NG', MACHINE.join(' / ')],
+      ['抽测结果', SAMPLE.join(' / ')],
       ['备注', '自由填写'],
       ['记录时间 / 更新时间', '留空即可'],
       [],
-      ['流程', '页面导出 → Excel 里登记/修改 → 页面导入（按 ID 合并）→ 点某一行看该工单的良率、一体机、测试时间和分析']
+      ['流程', '页面导出 → Excel 里登记 → 页面导入（按 ID 或工单合并）→ 点某一行看分析']
     ]), '说明');
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     try {
@@ -11223,29 +11209,42 @@ document.addEventListener('DOMContentLoaded', dualInit);
   function woMerge(list) {
     const cur = woAll();
     const byId = new Map(cur.map(r => [r.id, r]));
-    const byKey = new Map(cur.map(r => [String(r.order).trim() + '|' + bakeOf(r.bake), r]));
+    const byOrder = new Map(cur.map(r => [String(r.order).trim(), r]));
     let added = 0, updated = 0;
     for (const o of list) {
       const order = String(o.order || '').trim();
       if (!order) continue;
-      const bake = bakeOf(o.bake);
-      let rec = (o.id && byId.get(o.id)) || byKey.get(order + '|' + bake);
+      let rec = (o.id && byId.get(o.id)) || byOrder.get(order);
       if (rec) {
-        Object.assign(rec, { order, bake, result: o.result || rec.result, note: o.note, updatedAt: nowIso() });
-        rec.history = (rec.history || []).concat([{ at: nowIso(), action: '导入更新', result: rec.result }]);
+        Object.assign(rec, {
+          order,
+          furnace: o.furnace || rec.furnace,
+          pn: o.pn || rec.pn,
+          machineNg: MACHINE.includes(o.machineNg) ? o.machineNg : rec.machineNg,
+          sample: SAMPLE.includes(o.sample) ? o.sample : rec.sample,
+          note: o.note,
+          updatedAt: nowIso()
+        });
+        rec.history = (rec.history || []).concat([{ at: nowIso(), action: '导入更新', machineNg: rec.machineNg, sample: rec.sample }]);
         updated++;
       } else {
+        const lk = woLookup({ order });
         const rec2 = {
-          id: o.id || ('wo_' + order + '_' + bake + '_' + Date.now() + Math.random().toString(36).slice(2, 5)),
-          order, bake, result: o.result || 'NG', note: o.note || '',
-          date: o.date || new Date().toISOString().slice(0, 10),
-          createdAt: o.createdAt || nowIso(), updatedAt: nowIso(),
-          history: [{ at: nowIso(), action: '导入新增', result: o.result || 'NG' }]
+          id: o.id || ('wo_' + order + '_' + Date.now() + Math.random().toString(36).slice(2, 5)),
+          order,
+          furnace: o.furnace || (lk.furnaces || []).join('/'),
+          pn: o.pn || (lk.pns || []).join('/'),
+          machineNg: MACHINE.includes(o.machineNg) ? o.machineNg : '待定',
+          sample: SAMPLE.includes(o.sample) ? o.sample : 'NG',
+          note: o.note || '',
+          date: new Date().toISOString().slice(0, 10),
+          createdAt: nowIso(), updatedAt: nowIso(),
+          history: [{ at: nowIso(), action: '导入新增', machineNg: o.machineNg || '待定', sample: o.sample || 'NG' }]
         };
-        cur.unshift(rec2); byId.set(rec2.id, rec2); byKey.set(order + '|' + bake, rec2); added++;
+        cur.unshift(rec2); byId.set(rec2.id, rec2); byOrder.set(order, rec2); added++;
       }
     }
-    woSave(cur); renderOrders(); woCandidates();
+    woSave(cur); renderOrders();
     toast(`导入完成：新增 ${added}，更新 ${updated}`, 'success');
   }
 
@@ -11269,9 +11268,12 @@ document.addEventListener('DOMContentLoaded', dualInit);
         const ws = wb.Sheets[name];
         const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
         if (!aoa.length) throw new Error('工作表是空的');
-        const head = aoa[0].map(h => String(h == null ? '' : h).replace(/\s+/g, ''));
-        const col = (...names) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
-        const ci = { id: col('ID', '编号'), order: col('工单'), bake: col('烘烤次数'), result: col('记录结果', '结果'), note: col('备注'), createdAt: col('记录时间') };
+        const head = aoa[0].map(h => String(h == null ? '' : h).replace(/\s+/g, '').toUpperCase());
+        const col = (...names) => { for (const n of names) { const i = head.indexOf(String(n).toUpperCase()); if (i >= 0) return i; } return -1; };
+        const ci = {
+          id: col('ID', '编号'), order: col('工单'), furnace: col('炉号'), pn: col('PN'),
+          machineNg: col('一体机NG', '一体机NG?'), sample: col('抽测结果', '结果'), note: col('备注'), createdAt: col('记录时间')
+        };
         if (ci.order < 0) throw new Error('表头缺少「工单」列');
         const list = [];
         for (let i = 1; i < aoa.length; i++) {
@@ -11282,8 +11284,10 @@ document.addEventListener('DOMContentLoaded', dualInit);
           list.push({
             id: ci.id >= 0 ? String(r[ci.id] || '').trim() : '',
             order,
-            bake: ci.bake >= 0 ? String(r[ci.bake] || '').trim() : '',
-            result: ci.result >= 0 ? String(r[ci.result] || '').trim() : 'NG',
+            furnace: ci.furnace >= 0 ? String(r[ci.furnace] || '').trim() : '',
+            pn: ci.pn >= 0 ? String(r[ci.pn] || '').trim() : '',
+            machineNg: ci.machineNg >= 0 ? String(r[ci.machineNg] || '').trim() : '',
+            sample: ci.sample >= 0 ? String(r[ci.sample] || '').trim() : 'NG',
             note: ci.note >= 0 ? String(r[ci.note] || '').trim() : '',
             createdAt: ci.createdAt >= 0 ? woDate(r[ci.createdAt]) : ''
           });
@@ -11298,27 +11302,41 @@ document.addEventListener('DOMContentLoaded', dualInit);
   /* ---------- 初始化 ---------- */
   function initOrders() {
     if (!document.getElementById('wo-body')) return;
-    const rf = document.getElementById('wo-f-result');
-    if (rf && !rf.options.length) RESULTS.forEach(x => rf.add(new Option(x, x)));
-    const bf = document.getElementById('wo-f-bake');
-    if (bf && !bf.options.length) BAKES.forEach(x => bf.add(new Option(x || '全部', x)));
+    const ms = document.getElementById('wo-f-machine');
+    if (ms && !ms.options.length) MACHINE.forEach(x => ms.add(new Option(x, x)));
+    const sp = document.getElementById('wo-f-sample');
+    if (sp && !sp.options.length) SAMPLE.forEach(x => sp.add(new Option(x, x)));
+
+    const orderInp = document.getElementById('wo-f-order');
+    orderInp.addEventListener('change', woAutofill);
+    orderInp.addEventListener('blur', woAutofill);
+    ['wo-f-furnace', 'wo-f-pn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { el.dataset.touched = '1'; });
+    });
 
     document.getElementById('wo-f-add').addEventListener('click', () => {
       woAdd(
-        document.getElementById('wo-f-order').value,
-        document.getElementById('wo-f-bake').value,
-        document.getElementById('wo-f-result').value,
+        orderInp.value,
+        document.getElementById('wo-f-furnace').value,
+        document.getElementById('wo-f-pn').value,
+        document.getElementById('wo-f-machine').value,
+        document.getElementById('wo-f-sample').value,
         document.getElementById('wo-f-note').value
       );
-      document.getElementById('wo-f-order').value = '';
+      orderInp.value = '';
+      document.getElementById('wo-f-furnace').value = '';
+      document.getElementById('wo-f-furnace').dataset.touched = '';
+      document.getElementById('wo-f-pn').value = '';
+      document.getElementById('wo-f-pn').dataset.touched = '';
       document.getElementById('wo-f-note').value = '';
+      document.getElementById('wo-f-preview').textContent = '';
     });
 
     document.getElementById('wo-export').addEventListener('click', woExport);
     const fi = document.getElementById('wo-import-input');
     document.getElementById('wo-import').addEventListener('click', () => fi.click());
     fi.addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) woImport(f); });
-    document.getElementById('wo-gen').addEventListener('click', woCandidates);
     document.getElementById('wo-filter').addEventListener('change', renderOrders);
     document.getElementById('wo-search').addEventListener('input', renderOrders);
 
@@ -11328,33 +11346,17 @@ document.addEventListener('DOMContentLoaded', dualInit);
       const id = tr.dataset.woId;
       const act = e.target.closest('[data-wo-act]');
       if (act && act.dataset.woAct === 'del') { if (confirm('删除这条记录？')) woDelete(id); return; }
-      dualStateOrderSelected = id;
+      woSelected = id;
       document.querySelectorAll('#wo-body tr.wo-row').forEach(x => x.classList.toggle('on', x.dataset.woId === id));
       renderDetail(id);
     });
 
-    document.getElementById('wo-candidates').addEventListener('click', e => {
-      const b = e.target.closest('[data-wo-add]');
-      if (!b) return;
-      const order = b.dataset.woAdd, bake = b.dataset.woBake || '';
-      const lk = (() => {
-        const d = state.yieldData;
-        let rows = d.rows.filter(r => String(r.工单 || '').trim() === order);
-        if (bake) rows = rows.filter(r => bakeOf(r.烘烤次数) === bake);
-        let ng = 0, wl = 0;
-        for (const r of rows) { ng += r.NG || 0; wl += r.波长长J || 0; }
-        return { ng, wl };
-      })();
-      woAdd(order, bake, lk.wl > lk.ng ? '波长长' : 'NG', '');
-    });
-
     renderOrders();
     renderDetail(null);
-    woCandidates();
+
   }
 
   global.renderOrders = renderOrders;
-  global.woCandidates = woCandidates;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOrders);
   else initOrders();
 })(typeof window !== 'undefined' ? window : globalThis);
