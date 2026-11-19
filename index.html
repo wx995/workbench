@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -264,6 +264,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .chart-tools select[multiple]{min-width:150px;max-width:260px}
 .chart-tools input[type=date]{font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg)}
 .chart-tools .tool-hint{color:var(--fg-subtle);font-size:11px}
+.quick-range{display:inline-flex;gap:4px;align-items:center;margin-left:2px}
+.quick-range .btn{padding:1px 7px;font-size:11px;border-radius:10px}
+.quick-range .btn:hover{background:var(--bg-hover);border-color:var(--border)}
 .chart-note{font-size:12px;color:var(--fg-muted);padding:0 14px 10px;line-height:1.55}
 .chart-note b{color:var(--fg)}
 .insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px;padding:0 14px 12px}
@@ -440,7 +443,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   <div class="app-logo">烤</div>
   <div>
     <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.11.5</div>
+    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.0</div>
   </div>
   <div class="header-badges" id="header-badges">
     <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -872,6 +875,11 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <input type="date" id="furn-start">
       <span class="tool-label">~</span>
       <input type="date" id="furn-end">
+      <span class="quick-range" data-cat="furn">
+        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
+        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
+        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
+      </span>
       <span class="tool-label">烘烤</span>
       <select multiple id="furn-bake" size="4" title="Ctrl / Shift 多选"></select>
       <span class="tool-hint">日期与烘烤只影响纳入的数据，不影响横轴顺序</span>
@@ -900,6 +908,11 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <input type="date" id="mach-start">
       <span class="tool-label">~</span>
       <input type="date" id="mach-end">
+      <span class="quick-range" data-cat="mach">
+        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
+        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
+        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
+      </span>
       <span class="tool-label">粒度</span>
       <select id="mach-gran">
         <option value="day">按日</option>
@@ -953,6 +966,11 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <input type="date" id="overall-start">
       <span class="tool-label">~</span>
       <input type="date" id="overall-end">
+      <span class="quick-range" data-cat="overall">
+        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
+        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
+        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
+      </span>
       <span class="tool-hint">日期只决定纳入哪些炉号；纳入后按该炉号全周期累计，避免只截取最近几天导致 OK 基数过小</span>
     </div>
     <div class="kpi-strip" id="overall-kpi"></div>
@@ -1513,7 +1531,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.11.5';
+const VERSION = 'v1.12.0';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -5980,7 +5998,21 @@ function bindYieldEvents() {
   $('#filter-grid').addEventListener('input', onFilterChange);
   $('#filter-grid').addEventListener('click', e => {
     const chip = e.target.closest('.pn-chips .chip');
-    if (chip && chip.dataset.pn) togglePnChip(chip.dataset.pn);
+    if (chip && chip.dataset.pn) { togglePnChip(chip.dataset.pn); return; }
+    /* 结束日期旁的快捷区间：点一下就把开始日期往前推 1 周 / 1 月 / 3 月 */
+    const q = e.target.closest('.quick-range [data-quick]');
+    if (q) {
+      const d = state.yieldData;
+      const end = isIsoDate(state.filters.end) ? state.filters.end : (d && d.dateMax) || '';
+      if (!end) { toast('请先导入产能登记表', 'warn'); return; }
+      const s = wbQuickStart(end, q.dataset.quick);
+      if (!s) return;
+      state.filters.start = s;
+      state.filters.end = end;
+      const st = $('#f-start'); if (st) st.value = s;
+      const en = $('#f-end'); if (en) en.value = end;
+      renderYieldCharts();
+    }
   });
   $('#trend-gran').addEventListener('change', e => { state.trendGran = e.target.value; renderYieldCharts(); });
   $('#trend-window').addEventListener('change', e => { state.trendWindow = Number(e.target.value); renderYieldCharts(); });
@@ -6089,6 +6121,31 @@ function bindYieldEvents() {
     state.overallEnd = e.target.value || '';
     if (state.overallStart && state.overallEnd && state.overallStart > state.overallEnd) state.overallStart = state.overallEnd;
     renderOverall();
+  });
+
+  /* 趋势专题三块（炉号 / 一体机 / 总体）的快捷区间：开始日期 = 结束日期往前 1 周 / 1 月 / 3 月 */
+  const TREND_QUICK = {
+    furn: { startKey: 'furnStart', endKey: 'furnEnd', startId: 'furn-start', endId: 'furn-end', render: () => renderFurnTrendChart() },
+    mach: { startKey: 'machStart', endKey: 'machEnd', startId: 'mach-start', endId: 'mach-end', render: () => renderMachTrendChart() },
+    overall: { startKey: 'overallStart', endKey: 'overallEnd', startId: 'overall-start', endId: 'overall-end', render: () => renderOverall() }
+  };
+  document.querySelectorAll('.quick-range[data-cat]').forEach(box => {
+    const cfg = TREND_QUICK[box.dataset.cat];
+    if (!cfg) return;
+    box.addEventListener('click', e => {
+      const btn = e.target.closest('[data-quick]');
+      if (!btn) return;
+      const d = state.yieldData;
+      if (!d) { toast('请先导入产能登记表', 'warn'); return; }
+      const end = isIsoDate(state[cfg.endKey]) ? state[cfg.endKey] : d.dateMax;
+      const s = wbQuickStart(end, btn.dataset.quick);
+      if (!s) return;
+      state[cfg.startKey] = s;
+      state[cfg.endKey] = end;
+      const se = document.getElementById(cfg.startId); if (se) se.value = s;
+      const ee = document.getElementById(cfg.endId); if (ee) ee.value = end;
+      cfg.render();
+    });
   });
   const ovPn = $('#overall-pn');
   if (ovPn) ovPn.addEventListener('change', e => {
@@ -6900,7 +6957,15 @@ function buildFilterGrid() {
 
   grid.innerHTML = `
     <div class="filter-item"><label>开始日期（默认最近 7 天）</label><input type="date" id="f-start" value="${state.filters.start || d.dateMin}"></div>
-    <div class="filter-item"><label>结束日期</label><input type="date" id="f-end" value="${state.filters.end || d.dateMax}"></div>
+    <div class="filter-item"><label>结束日期</label>
+      <input type="date" id="f-end" value="${state.filters.end || d.dateMax}">
+      <span class="quick-range" data-cat="yield">
+        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周（含结束日共 7 天）">近 1 周</button>
+        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个自然月">近 1 月</button>
+        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个自然月">近 3 月</button>
+      </span>
+      <span class="val">点按钮自动定开始日期</span>
+    </div>
     ${mkMulti('machine', '一体机（多选）', machines, '一体机')}
     ${mkMulti('bake', '烘烤次数（多选）', bakes, '烘烤次数')}
     <div class="filter-item"><label>PN（输入，逗号分隔，支持包含）</label>
@@ -6944,6 +7009,33 @@ function togglePnChip(pn) {
   syncPnChips();
   renderYieldCharts();
   renderReportFilters();
+}
+
+/* ---------- 日期快捷区间：一键把开始日期定成「结束日期往前 1 周 / 1 月 / 3 月」 ---------- */
+function wbFmtDate(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function wbAddDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return wbFmtDate(d);
+}
+function wbAddMonths(iso, n) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  return wbFmtDate(d);
+}
+/* kind: w = 1 周（含结束日共 7 天）, m = 1 个自然月, q = 3 个自然月 */
+function wbQuickStart(endIso, kind) {
+  if (!isIsoDate(endIso)) return '';
+  if (kind === 'w') return wbAddDays(endIso, -6);
+  if (kind === 'm') return wbAddDays(wbAddMonths(endIso, -1), 1);
+  if (kind === 'q') return wbAddDays(wbAddMonths(endIso, -3), 1);
+  return '';
 }
 
 function onFilterChange(e) {
