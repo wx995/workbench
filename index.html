@@ -116,6 +116,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl tbody tr:nth-child(even){background:#fbfcfd}
 .tbl tbody tr:hover{background:var(--bg-hover)}
 .tbl td.num,.tbl th.num{text-align:right;font-family:var(--mono)}
+/* 产量达标矩阵：绿=达标，红=未达标，灰=无生产 */
+.mx td.ok{background:#dafbe1;color:#1a7f37;font-weight:600}
+.mx td.bad{background:#ffebe9;color:#cf222e;font-weight:700}
+.mx td.na{color:#8c959f}
+.mx td .sub{display:block;font-size:10px;font-weight:400;color:#6e7781}
+.mx td.bad .sub{color:#a40e26}
+.mx th.rot{max-width:78px;white-space:normal;font-size:11px;line-height:1.2}
 .tbl .cell-ng{background:var(--danger-bg)!important;color:var(--danger);font-weight:600}
 .tbl .cell-ok{background:var(--success-bg)!important;color:var(--success-em)}
 .tbl .cell-chg{color:var(--fg-muted);font-size:12px}
@@ -441,7 +448,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
     <div class="app-logo">烤</div>
     <div>
       <div class="app-title">光谱与良率分析工作台</div>
-      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.2</div>
+      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.3</div>
     </div>
     <div class="header-badges" id="header-badges">
       <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -967,13 +974,17 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       </select>
       <span class="tool-label">一体机</span>
       <select multiple id="machout-pick" size="4" title="Ctrl / Shift 多选"></select>
-      <span class="tool-hint">柱高 = 该周期测试总数（只）；多选为一台一段叠加</span>
+      <button type="button" class="btn btn-sm" id="machout-all" title="把全部机台都放进矩阵">全部机台</button>
+      <span class="tool-label">合格线</span>
+      <input type="number" id="machout-line" min="0" step="100" placeholder="只/天/台" style="width:110px">
+      <span class="tool-hint">填了按「日均产量 ≥ 合格线」判定；下方矩阵绿=达标、红=未达标</span>
     </div>
     <div class="kpi-strip" id="machout-kpi"></div>
     <div class="chart-wrap">
       <div id="machout-chart" style="height:400px"></div>
     </div>
     <div class="chart-note" id="note-machout"></div>
+    <div id="machout-matrix"></div>
     <div id="machout-table"></div>
   </div>
 
@@ -1555,7 +1566,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.12.2';
+const VERSION = 'v1.12.3';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -6169,6 +6180,20 @@ function bindYieldEvents() {
     state.machOutPicks = [];
     renderMachOutChart();
   });
+  const moLine = $('#machout-line');
+  if (moLine) moLine.addEventListener('change', e => {
+    const v = Number(e.target.value);
+    state.machOutLine = isFinite(v) && v > 0 ? v : 0;
+    renderMachOutChart();
+  });
+  const moAll = $('#machout-all');
+  if (moAll) moAll.addEventListener('click', () => {
+    const sel = $('#machout-pick');
+    if (!sel) return;
+    Array.from(sel.options).forEach(o => { o.selected = true; });
+    state.machOutPicks = Array.from(sel.options).map(o => o.value);
+    renderMachOutChart();
+  });
   const ovEnd = $('#overall-end');
   if (ovEnd) ovEnd.addEventListener('change', e => {
     state.overallEnd = e.target.value || '';
@@ -8402,12 +8427,14 @@ function renderMachOutChart() {
   const noteTop = $('#machout-note-top');
   const kpi = $('#machout-kpi');
   const tableWrap = $('#machout-table');
+  const matrixWrap = $('#machout-matrix');
   const d = state.yieldData;
   const clearAll = () => {
     if (pickSel) pickSel.innerHTML = '';
     if (note) note.textContent = '';
     if (kpi) kpi.innerHTML = '';
     if (tableWrap) tableWrap.innerHTML = '';
+    if (matrixWrap) matrixWrap.innerHTML = '';
     if (noteTop) noteTop.textContent = '先选日期与粒度';
   };
   if (!d) {
@@ -8470,9 +8497,10 @@ function renderMachOutChart() {
   const gran = ['day', 'week', 'month'].includes(state.machOutGran) ? state.machOutGran : 'day';
   const granText = gran === 'day' ? '日' : gran === 'week' ? '周' : '月';
   const pickRows = rows.filter(r => picks.includes(String(r.一体机 || '').trim()));
-  const buckets = bucketRows(pickRows, gran);
+  /* 横轴用「全部机台」的周期，避免未选机台漏掉某些日期 */
+  const buckets = bucketRows(rows, gran);
   if (!buckets.length) {
-    showEmpty('machout-chart', '所选一体机在该日期范围内没有产量记录。');
+    showEmpty('machout-chart', '所选条件下没有产量记录。');
     clearAll();
     return;
   }
@@ -8486,7 +8514,11 @@ function renderMachOutChart() {
     }
   }
   const totalOf = key => { const arr = byMB.get(key) || []; return arr.length ? agg(arr).total : null; };
-  const bucketTotals = buckets.map(b => ({ key: b.key, label: b.label, total: agg(b.rows).total }));
+  const pickSet = new Set(picks);
+  const bucketTotals = buckets.map(b => ({
+    key: b.key, label: b.label,
+    total: agg(b.rows.filter(r => pickSet.has(String(r.一体机 || '').trim()))).total
+  }));
 
   const series = picks.map((name, gi) => ({
     name: '一体机 ' + name,
@@ -8541,18 +8573,86 @@ function renderMachOutChart() {
     series
   });
 
+  /* 合格线（只/天/台）：按「日均产量」判定达标 */
+  const lineEl = $('#machout-line');
+  let line = Number(state.machOutLine);
+  if (!isFinite(line) || line <= 0) line = 0;
+  state.machOutLine = line;
+  if (lineEl && String(lineEl.value) !== (line ? String(line) : '')) lineEl.value = line ? String(line) : '';
+
+  const statOf = (m, key) => {
+    const rs = byMB.get(m + '||' + key) || [];
+    if (!rs.length) return null;
+    const a = agg(rs);
+    const dc = uniq(rs.map(r => r.date)).length;
+    return { total: a.total, days: dc, avg: dc ? a.total / dc : 0 };
+  };
+
   /* KPI + 每台机器汇总表 */
   const picked = agg(pickRows);
   const days = uniq(pickRows.map(r => r.date)).length;
   const peak = bucketTotals.slice().sort((a, b) => b.total - a.total)[0];
   const topMachine = machines.filter(m => picks.includes(m.k)).sort((a, b) => b.total - a.total)[0];
   const card = (label, value, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+
+  /* 达标统计：格子 = 周期 × 机台 */
+  let okCells = 0, badCells = 0, naCells = 0;
+  const badByMachine = new Map();
+  const okByMachine = new Map();
+  if (line > 0) {
+    for (const m of picks) {
+      for (const b of buckets) {
+        const s = statOf(m, b.key);
+        if (!s) { naCells++; continue; }
+        if (s.avg >= line) { okCells++; okByMachine.set(m, (okByMachine.get(m) || 0) + 1); }
+        else { badCells++; badByMachine.set(m, (badByMachine.get(m) || 0) + 1); }
+      }
+    }
+  }
+  const cellTotal = okCells + badCells;
+  const passRate = cellTotal ? okCells / cellTotal : null;
+  const worstMachine = [...badByMachine.entries()].sort((a, b) => b[1] - a[1])[0];
+
   if (kpi) {
     kpi.innerHTML =
       card('总产量', picked.total.toLocaleString(), `${picks.length} 台机台 · ${days} 天有生产`, 'accent')
       + card('日均产量', days ? Math.round(picked.total / days).toLocaleString() : '—', `按自然日平均 · ${ms} ~ ${me}`)
       + card(`单${granText}峰值`, peak ? peak.total.toLocaleString() : '—', peak ? peak.label : '—', 'ok')
-      + card('产量最高机台', topMachine ? topMachine.k : '—', topMachine ? `${topMachine.total.toLocaleString()} 只 · 占 ${round(picked.total ? topMachine.total / picked.total * 100 : 0, 1)}%` : '—');
+      + card('产量最高机台', topMachine ? topMachine.k : '—', topMachine ? `${topMachine.total.toLocaleString()} 只 · 占 ${round(picked.total ? topMachine.total / picked.total * 100 : 0, 1)}%` : '—')
+      + (line > 0 ? card('达标率', passRate === null ? '—' : round(passRate * 100, 1) + '%', `${okCells} 达标 / ${badCells} 未达标${naCells ? ' / ' + naCells + ' 无数据' : ''}`, passRate !== null && passRate >= 0.9 ? 'ok' : 'warn') : '');
+  }
+
+  /* 每期 × 每台 产量矩阵（有合格线时按「日均」着色） */
+  if (matrixWrap) {
+    const head = `<tr><th>${gran === 'day' ? '日期' : gran === 'week' ? '周' : '月'}</th>` +
+      picks.map(m => `<th class="num rot" title="${esc(m)}">${esc(m)}</th>`).join('') +
+      `<th class="num">合计</th></tr>`;
+    const body = buckets.map(b => {
+      const bt = bucketTotals.find(x => x.key === b.key);
+      const cells = picks.map(m => {
+        const s = statOf(m, b.key);
+        if (!s) return `<td class="na num">—</td>`;
+        const pass = s.avg >= line;
+        const tip = `${m} ${b.label}：${s.total.toLocaleString()} 只` +
+          (s.days > 1 ? `（${s.days} 天，日均 ${Math.round(s.avg).toLocaleString()}）` : '') +
+          (line > 0 ? ` · 合格线 ${line.toLocaleString()}` : '');
+        const sub = s.days > 1 ? `<span class="sub">日均 ${Math.round(s.avg).toLocaleString()}</span>` : '';
+        const cls = line > 0 ? (pass ? 'ok' : 'bad') : '';
+        return `<td class="${cls} num" title="${esc(tip)}">${s.total.toLocaleString()}${sub}</td>`;
+      }).join('');
+      return `<tr><td><b>${esc(b.label)}</b></td>${cells}<td class="num"><b>${bt ? bt.total.toLocaleString() : '—'}</b></td></tr>`;
+    }).join('');
+    const headNote = line > 0
+      ? `合格线 <b>${line.toLocaleString()}</b> 只/天/台 · ` +
+        `<span style="color:#1a7f37">达标 ${okCells}</span> / <span style="color:#cf222e">未达标 ${badCells}</span>` +
+        (naCells ? ` / 无数据 ${naCells}` : '') +
+        ` · 达标率 <b>${passRate === null ? '—' : round(passRate * 100, 1) + '%'}</b>` +
+        (worstMachine ? ` · 未达标最多：<b>${esc(worstMachine[0])}</b>（${worstMachine[1]} 个${granText}）` : '')
+      : `每格 = 该机台该${granText}的产量（只）；填「合格线」后按「日均产量 ≥ 合格线」着色（绿=达标、红=未达标）`;
+    matrixWrap.innerHTML =
+      `<div class="box-note" style="padding:2px 0 6px">${headNote}</div>` +
+      `<div class="tbl-wrap" style="max-height:420px"><table class="tbl mx">` +
+      `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
   if (tableWrap) {
@@ -8564,6 +8664,9 @@ function renderMachOutChart() {
         const v = totalOf(m.k + '||' + b.key);
         if (v !== null && (!pk || v > pk.total)) pk = { label: b.label, total: v };
       }
+      const okD = okByMachine.get(m.k) || 0;
+      const badD = badByMachine.get(m.k) || 0;
+      const rate = (okD + badD) ? round(okD / (okD + badD) * 100, 0) + '%' : '—';
       return `<tr${sel ? ' style="background:var(--bg-subtle)"' : ''}>
         <td><b>${esc(m.k)}</b>${sel ? ' <span class="label label-ok" style="font-size:10px">图上</span>' : ''}</td>
         <td class="num">${m.total.toLocaleString()}</td>
@@ -8571,10 +8674,13 @@ function renderMachOutChart() {
         <td class="num">${m.days ? Math.round(m.total / m.days).toLocaleString() : '—'}</td>
         <td class="num">${pk ? pk.total.toLocaleString() : '—'}</td>
         <td>${pk ? esc(pk.label) : '—'}</td>
+        ${line > 0 ? `<td class="num">${sel ? `${okD} / ${okD + badD}` : '—'}</td><td class="num">${sel ? rate : '—'}</td>` : ''}
       </tr>`;
     }).join('');
     tableWrap.innerHTML = `<div class="tbl-wrap" style="max-height:340px"><table class="tbl">
-      <thead><tr><th>一体机</th><th class="num">产量（只）</th><th class="num">占比</th><th class="num">日均</th><th class="num">峰值</th><th>峰值${granText}</th></tr></thead>
+      <thead><tr><th>一体机</th><th class="num">产量（只）</th><th class="num">占比</th><th class="num">日均</th><th class="num">峰值</th><th>峰值${granText}</th>` +
+      (line > 0 ? `<th class="num">达标${granText}数</th><th class="num">达标率</th>` : '') +
+      `</tr></thead>
       <tbody>${rowsHtml}</tbody></table></div>`;
   }
 
@@ -8583,7 +8689,12 @@ function renderMachOutChart() {
       `所选 ${picks.length} 台共 <b>${picked.total.toLocaleString()}</b> 只，覆盖 ${days} 个自然日；` +
       (peak ? `单${granText}最高 ${esc(peak.label)}（${peak.total.toLocaleString()} 只）；` : '') +
       (topMachine ? `产量最高为 ${esc(topMachine.k)}（${topMachine.total.toLocaleString()} 只）。` : '') +
-      `<br>柱为各机台产量叠加，鼠标悬停看每台明细；下方表格列出全部 ${machines.length} 台（含未上图的）。`;
+      (line > 0
+        ? `<br><b>达标判定</b>：日均 ≥ ${line.toLocaleString()} 只/天/台为达标，${okCells} 个${granText}达标、${badCells} 个未达标` +
+          (passRate === null ? '' : `（达标率 ${round(passRate * 100, 1)}%）`) +
+          (worstMachine ? `；未达标最多 ${esc(worstMachine[0])}（${worstMachine[1]} 个${granText}）。` : '。')
+        : `<br>填「合格线」后，这里会按天/周/月给出每台机台的达标情况（绿=达标、红=未达标）。`) +
+      `<br>柱为各机台产量叠加，鼠标悬停看每台明细；下方矩阵为每台 × 每个${granText}的产量（填了合格线就按日均着色），再下面是全部 ${machines.length} 台汇总。`;
   }
 }
 
