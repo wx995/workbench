@@ -441,7 +441,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
     <div class="app-logo">烤</div>
     <div>
       <div class="app-title">光谱与良率分析工作台</div>
-      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.1</div>
+      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.2</div>
     </div>
     <div class="header-badges" id="header-badges">
       <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -936,6 +936,45 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <div id="mach-trend-chart" style="height:400px"></div>
     </div>
     <div class="chart-note" id="note-mach"></div>
+  </div>
+
+  <div class="box">
+    <div class="box-header">
+      <h3>一体机产量（按日 / 周 / 月）</h3>
+      <span class="label label-neutral" id="machout-note-top">先选日期与粒度</span>
+    </div>
+    <div class="chart-tools">
+      <span class="tool-label">PN</span>
+      <input type="text" id="machout-pn" list="machout-pn-options" placeholder="全部 PN（可输入/选择）" style="min-width:0;flex:1 1 200px;max-width:100%">
+      <datalist id="machout-pn-options"></datalist>
+      <span class="tool-hint">留空 = 全部 PN；输入按前缀匹配</span>
+    </div>
+    <div class="chart-tools">
+      <span class="tool-label">日期</span>
+      <input type="date" id="machout-start">
+      <span class="tool-label">~</span>
+      <input type="date" id="machout-end">
+      <span class="quick-range" data-cat="machout">
+        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
+        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
+        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
+      </span>
+      <span class="tool-label">粒度</span>
+      <select id="machout-gran">
+        <option value="day">按日</option>
+        <option value="week">按周</option>
+        <option value="month">按月</option>
+      </select>
+      <span class="tool-label">一体机</span>
+      <select multiple id="machout-pick" size="4" title="Ctrl / Shift 多选"></select>
+      <span class="tool-hint">柱高 = 该周期测试总数（只）；多选为一台一段叠加</span>
+    </div>
+    <div class="kpi-strip" id="machout-kpi"></div>
+    <div class="chart-wrap">
+      <div id="machout-chart" style="height:400px"></div>
+    </div>
+    <div class="chart-note" id="note-machout"></div>
+    <div id="machout-table"></div>
   </div>
 
   <div class="box">
@@ -1516,7 +1555,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.12.1';
+const VERSION = 'v1.12.2';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -6101,6 +6140,35 @@ function bindYieldEvents() {
     if (state.overallStart && state.overallEnd && state.overallStart > state.overallEnd) state.overallEnd = state.overallStart;
     renderOverall();
   });
+  /* 一体机产量（日/周/月） */
+  const moGran = $('#machout-gran');
+  if (moGran) moGran.addEventListener('change', e => {
+    state.machOutGran = ['day', 'week', 'month'].includes(e.target.value) ? e.target.value : 'day';
+    renderMachOutChart();
+  });
+  const moStart = $('#machout-start');
+  if (moStart) moStart.addEventListener('change', e => {
+    state.machOutStart = e.target.value || '';
+    if (state.machOutStart && state.machOutEnd && state.machOutStart > state.machOutEnd) state.machOutEnd = state.machOutStart;
+    renderMachOutChart();
+  });
+  const moEnd = $('#machout-end');
+  if (moEnd) moEnd.addEventListener('change', e => {
+    state.machOutEnd = e.target.value || '';
+    if (state.machOutStart && state.machOutEnd && state.machOutStart > state.machOutEnd) state.machOutStart = state.machOutEnd;
+    renderMachOutChart();
+  });
+  const moPick = $('#machout-pick');
+  if (moPick) moPick.addEventListener('change', e => {
+    state.machOutPicks = Array.from(e.target.selectedOptions).map(o => o.value).filter(Boolean);
+    renderMachOutChart();
+  });
+  const moPn = $('#machout-pn');
+  if (moPn) moPn.addEventListener('change', e => {
+    state.machOutPN = String(e.target.value || '').trim();
+    state.machOutPicks = [];
+    renderMachOutChart();
+  });
   const ovEnd = $('#overall-end');
   if (ovEnd) ovEnd.addEventListener('change', e => {
     state.overallEnd = e.target.value || '';
@@ -6112,6 +6180,7 @@ function bindYieldEvents() {
   const TREND_QUICK = {
     furn: { startKey: 'furnStart', endKey: 'furnEnd', startId: 'furn-start', endId: 'furn-end', render: () => renderFurnTrendChart() },
     mach: { startKey: 'machStart', endKey: 'machEnd', startId: 'mach-start', endId: 'mach-end', render: () => renderMachTrendChart() },
+    machout: { startKey: 'machOutStart', endKey: 'machOutEnd', startId: 'machout-start', endId: 'machout-end', render: () => renderMachOutChart() },
     overall: { startKey: 'overallStart', endKey: 'overallEnd', startId: 'overall-start', endId: 'overall-end', render: () => renderOverall() }
   };
   document.querySelectorAll('.quick-range[data-cat]').forEach(box => {
@@ -8325,6 +8394,199 @@ function renderMachTrendChart() {
   }
 }
 
+/* ---------- 一体机产量（日 / 周 / 月） ---------- */
+function renderMachOutChart() {
+  const el = $('#machout-chart');
+  const pickSel = $('#machout-pick');
+  const note = $('#note-machout');
+  const noteTop = $('#machout-note-top');
+  const kpi = $('#machout-kpi');
+  const tableWrap = $('#machout-table');
+  const d = state.yieldData;
+  const clearAll = () => {
+    if (pickSel) pickSel.innerHTML = '';
+    if (note) note.textContent = '';
+    if (kpi) kpi.innerHTML = '';
+    if (tableWrap) tableWrap.innerHTML = '';
+    if (noteTop) noteTop.textContent = '先选日期与粒度';
+  };
+  if (!d) {
+    showEmpty('machout-chart', '请先在「趋势专题」或「良率分析」页导入产能登记表。');
+    clearAll();
+    return;
+  }
+
+  const gs = d.dateMin, ge = d.dateMax;
+  let ms = isIsoDate(state.machOutStart) ? state.machOutStart : addDays(ge, -29);
+  let me = isIsoDate(state.machOutEnd) ? state.machOutEnd : ge;
+  if (ms < gs) ms = gs;
+  if (me > ge) me = ge;
+  if (!ms || !me || ms > me) { ms = addDays(ge, -29); me = ge; }
+  state.machOutStart = ms; state.machOutEnd = me;
+  const startEl = $('#machout-start'), endEl = $('#machout-end');
+  if (startEl) { startEl.min = gs; startEl.max = ge; startEl.value = ms; }
+  if (endEl) { endEl.min = gs; endEl.max = ge; endEl.value = me; }
+
+  const rangeRows = yieldRowsInRange(ms, me);
+  if (!rangeRows.length) {
+    showEmpty('machout-chart', '所选日期范围内无数据。');
+    clearAll();
+    return;
+  }
+
+  /* PN 选择：留空 = 全部；常用 PN 置顶 */
+  const pnInput = $('#machout-pn');
+  const pnList = $('#machout-pn-options');
+  const pnAgg = groupAgg(rangeRows, r => pnKey(r.PN)).filter(x => x.k && x.k !== '（空）').sort((a, b) => b.total - a.total);
+  const pnAvail = new Set(pnAgg.map(x => x.k));
+  if (pnList) pnList.innerHTML = pnAgg.map(x => `<option value="${esc(x.k)}">${esc(x.k)}（${x.total.toLocaleString()}）</option>`).join('');
+  let pn = String(state.machOutPN || '').trim();
+  if (pn && !pnAvail.has(pn) && !rangeRows.some(r => String(r.PN || '').trim().toLowerCase().startsWith(pn.toLowerCase()))) pn = '';
+  state.machOutPN = pn;
+  if (pnInput && pnInput.value !== pn) pnInput.value = pn;
+  const matchPN = r => !pn || String(r.PN || '').trim().toLowerCase().startsWith(pn.toLowerCase());
+  const rows = rangeRows.filter(matchPN);
+  if (!rows.length) {
+    showEmpty('machout-chart', `PN「${pn}」在所选日期范围内没有一体机记录。`);
+    clearAll();
+    return;
+  }
+
+  const machines = Array.from(groupRows(rows, r => String(r.一体机 || '').trim()).entries())
+    .map(([k, rs]) => ({ k, ...agg(rs), days: uniq(rs.map(r => r.date)).length }))
+    .filter(x => x.k && x.total > 0)
+    .sort((a, b) => a.k.localeCompare(b.k, undefined, { numeric: true }));
+  if (!machines.length) {
+    showEmpty('machout-chart', '所选条件下没有一体机记录。');
+    clearAll();
+    return;
+  }
+
+  let picks = (state.machOutPicks || []).filter(k => machines.some(m => m.k === k));
+  if (!picks.length) picks = machines.slice().sort((a, b) => b.total - a.total).slice(0, 5).map(m => m.k);
+  state.machOutPicks = picks;
+  fillPickOptions(pickSel, machines.map(m => ({ value: m.k, label: `${m.k}（${m.total.toLocaleString()} 只）` })), picks);
+
+  const gran = ['day', 'week', 'month'].includes(state.machOutGran) ? state.machOutGran : 'day';
+  const granText = gran === 'day' ? '日' : gran === 'week' ? '周' : '月';
+  const pickRows = rows.filter(r => picks.includes(String(r.一体机 || '').trim()));
+  const buckets = bucketRows(pickRows, gran);
+  if (!buckets.length) {
+    showEmpty('machout-chart', '所选一体机在该日期范围内没有产量记录。');
+    clearAll();
+    return;
+  }
+
+  const byMB = new Map();
+  for (const b of buckets) {
+    for (const r of b.rows) {
+      const key = String(r.一体机 || '').trim() + '||' + b.key;
+      const arr = byMB.get(key);
+      if (arr) arr.push(r); else byMB.set(key, [r]);
+    }
+  }
+  const totalOf = key => { const arr = byMB.get(key) || []; return arr.length ? agg(arr).total : null; };
+  const bucketTotals = buckets.map(b => ({ key: b.key, label: b.label, total: agg(b.rows).total }));
+
+  const series = picks.map((name, gi) => ({
+    name: '一体机 ' + name,
+    type: 'bar', stack: 'out',
+    barMaxWidth: gran === 'day' ? 20 : 48,
+    itemStyle: { color: TREND_COLORS[gi % TREND_COLORS.length] },
+    emphasis: { focus: 'series' },
+    data: buckets.map(b => totalOf(name + '||' + b.key))
+  }));
+
+  const fmtOut = v => v === null || v === undefined ? '—' : v.toLocaleString();
+
+  if (noteTop) {
+    noteTop.textContent = `PN ${pn || '全部'} · ${ms} ~ ${me} · 按${granText} · ${picks.length}/${machines.length} 台在图上`;
+  }
+
+  makeChart(el, {
+    animation: false,
+    tooltip: {
+      trigger: 'axis', confine: true,
+      axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const b = bucketTotals[ps[0].dataIndex];
+        if (!b) return '';
+        let html = `<b>${esc(b.label)}</b>　合计 ${b.total.toLocaleString()} 只`;
+        for (const p of ps) {
+          const name = String(p.seriesName || '').replace(/^一体机 /, '');
+          const v = totalOf(name + '||' + b.key);
+          if (v === null) continue;
+          html += `<br>${esc(name)}：${v.toLocaleString()} 只（${round(b.total ? v / b.total * 100 : 0, 1)}%）`;
+        }
+        return html;
+      }
+    },
+    legend: { top: 0, type: 'scroll' },
+    grid: { left: 62, right: 24, top: 44, bottom: 62 },
+    xAxis: {
+      type: 'category', data: buckets.map(b => b.label),
+      axisLabel: { color: '#57606a', rotate: buckets.length > 12 ? 45 : 0, hideOverlap: true },
+      axisLine: { lineStyle: { color: '#d0d7de' } }
+    },
+    yAxis: {
+      type: 'value', name: '产量 / 只', nameGap: 14,
+      nameTextStyle: { color: '#57606a' },
+      axisLabel: { color: '#57606a', formatter: v => v >= 10000 ? (v / 10000).toFixed(v % 10000 === 0 ? 0 : 1) + '万' : v },
+      splitLine: { lineStyle: { color: '#d8dee4', type: 'dashed' } }
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0 },
+      { type: 'slider', xAxisIndex: 0, bottom: 8, height: 16, borderColor: '#d0d7de', fillerColor: 'rgba(9,105,218,0.12)' }
+    ],
+    series
+  });
+
+  /* KPI + 每台机器汇总表 */
+  const picked = agg(pickRows);
+  const days = uniq(pickRows.map(r => r.date)).length;
+  const peak = bucketTotals.slice().sort((a, b) => b.total - a.total)[0];
+  const topMachine = machines.filter(m => picks.includes(m.k)).sort((a, b) => b.total - a.total)[0];
+  const card = (label, value, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+  if (kpi) {
+    kpi.innerHTML =
+      card('总产量', picked.total.toLocaleString(), `${picks.length} 台机台 · ${days} 天有生产`, 'accent')
+      + card('日均产量', days ? Math.round(picked.total / days).toLocaleString() : '—', `按自然日平均 · ${ms} ~ ${me}`)
+      + card(`单${granText}峰值`, peak ? peak.total.toLocaleString() : '—', peak ? peak.label : '—', 'ok')
+      + card('产量最高机台', topMachine ? topMachine.k : '—', topMachine ? `${topMachine.total.toLocaleString()} 只 · 占 ${round(picked.total ? topMachine.total / picked.total * 100 : 0, 1)}%` : '—');
+  }
+
+  if (tableWrap) {
+    const totalAll = picked.total || 1;
+    const rowsHtml = machines.map(m => {
+      const sel = picks.includes(m.k);
+      let pk = null;
+      for (const b of bucketTotals) {
+        const v = totalOf(m.k + '||' + b.key);
+        if (v !== null && (!pk || v > pk.total)) pk = { label: b.label, total: v };
+      }
+      return `<tr${sel ? ' style="background:var(--bg-subtle)"' : ''}>
+        <td><b>${esc(m.k)}</b>${sel ? ' <span class="label label-ok" style="font-size:10px">图上</span>' : ''}</td>
+        <td class="num">${m.total.toLocaleString()}</td>
+        <td class="num">${round(m.total / totalAll * 100, 1)}%</td>
+        <td class="num">${m.days ? Math.round(m.total / m.days).toLocaleString() : '—'}</td>
+        <td class="num">${pk ? pk.total.toLocaleString() : '—'}</td>
+        <td>${pk ? esc(pk.label) : '—'}</td>
+      </tr>`;
+    }).join('');
+    tableWrap.innerHTML = `<div class="tbl-wrap" style="max-height:340px"><table class="tbl">
+      <thead><tr><th>一体机</th><th class="num">产量（只）</th><th class="num">占比</th><th class="num">日均</th><th class="num">峰值</th><th>峰值${granText}</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table></div>`;
+  }
+
+  if (note) {
+    note.innerHTML = `<b>产量概况</b>（PN：${esc(pn || '全部')} · ${ms} ~ ${me} · 按${granText}）：` +
+      `所选 ${picks.length} 台共 <b>${picked.total.toLocaleString()}</b> 只，覆盖 ${days} 个自然日；` +
+      (peak ? `单${granText}最高 ${esc(peak.label)}（${peak.total.toLocaleString()} 只）；` : '') +
+      (topMachine ? `产量最高为 ${esc(topMachine.k)}（${topMachine.total.toLocaleString()} 只）。` : '') +
+      `<br>柱为各机台产量叠加，鼠标悬停看每台明细；下方表格列出全部 ${machines.length} 台（含未上图的）。`;
+  }
+}
+
 /* ---------- 总体良率（成熟炉号全周期，独立模块） ---------- */
 function renderOverall() {
   const d = state.yieldData;
@@ -8542,6 +8804,7 @@ function renderTrendsTab() {
   updateTrendsStatus();
   renderFurnTrendChart();
   renderMachTrendChart();
+  renderMachOutChart();
   renderOverall();
   refreshExportDefaultName();
 }
