@@ -20,24 +20,21 @@ a:hover{text-decoration:underline}
 code,.mono{font-family:var(--mono)}
 
 /* ===== Header ===== */
-.app-header{background:var(--bg-subtle);border-bottom:1px solid var(--border-muted);padding:12px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.app-header{position:sticky;top:0;z-index:90;background:var(--bg-subtle);border-bottom:1px solid var(--border-muted);padding:10px 24px 0;box-shadow:0 1px 6px rgba(0,0,0,.05)}
+.app-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:8px}
 .app-logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#1f883d,#0969da);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px}
 .app-title{font-size:16px;font-weight:600}
 .app-sub{color:var(--fg-muted);font-size:12px}
 .header-badges{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
 
-/* ===== Tabnav（右侧竖排，可隐藏） ===== */
-.tabnav{position:fixed;right:34px;top:50%;transform:translateY(-50%);width:170px;max-height:calc(100vh - 120px);background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:3px;box-shadow:-8px 0 24px rgba(0,0,0,.10);z-index:80;transition:transform .22s ease,opacity .22s ease}
-.tabnav.hidden{transform:translate(calc(100% + 44px),-50%);opacity:0;pointer-events:none}
-.tabnav-head{font-size:11px;color:var(--fg-subtle);padding:4px 9px 6px;letter-spacing:.12em}
-.tab{background:none;border:none;border-left:3px solid transparent;border-radius:6px;padding:9px 10px;font-size:13px;color:var(--fg-muted);cursor:pointer;white-space:nowrap;font-family:inherit;text-align:left;width:100%}
+/* ===== Tabnav（顶部横排，随表头固定） ===== */
+.tabnav{display:flex;flex-wrap:wrap;align-items:flex-end;gap:4px;padding:0;background:transparent;border:none;border-radius:0;box-shadow:none;position:static;width:auto;max-height:none;transform:none;transition:none}
+.tabnav-head{display:none}
+.tab{background:none;border:none;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;padding:7px 12px;font-size:13px;color:var(--fg-muted);cursor:pointer;white-space:nowrap;font-family:inherit;text-align:center;width:auto}
 .tab:hover{color:var(--fg);background:var(--bg-subtle)}
-.tab.active{color:var(--fg);font-weight:600;border-left-color:#fd8c73;background:var(--bg-subtle)}
+.tab.active{color:var(--fg);font-weight:600;border-bottom-color:#fd8c73;background:var(--bg)}
 .tab .tab-count{background:var(--bg-subtle);border:1px solid var(--border-muted);border-radius:999px;font-size:11px;padding:0 7px;margin-left:6px;color:var(--fg-muted);font-weight:400}
-.tabnav-toggle{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:81;background:var(--bg);border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px;padding:12px 6px;font-size:12px;color:var(--fg-muted);cursor:pointer;font-family:inherit;writing-mode:vertical-rl;letter-spacing:.12em;box-shadow:-4px 0 12px rgba(0,0,0,.08)}
-.tabnav-toggle:hover{color:var(--fg);background:var(--bg-subtle)}
-body:not(.tabnav-hidden) .container{padding-right:210px}
-@media(max-width:1100px){body:not(.tabnav-hidden) .container{padding-right:24px}.tabnav{width:156px;right:32px}}
+.tabnav-toggle{display:none!important}
 
 /* ===== 双规格一致性 ===== */
 .dual-layout{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
@@ -440,28 +437,27 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
 <body>
 
 <header class="app-header">
-  <div class="app-logo">烤</div>
-  <div>
-    <div class="app-title">光谱与良率分析工作台</div>
-    <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.0</div>
+  <div class="app-bar">
+    <div class="app-logo">烤</div>
+    <div>
+      <div class="app-title">光谱与良率分析工作台</div>
+      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.1</div>
+    </div>
+    <div class="header-badges" id="header-badges">
+      <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
+      <span class="pill" id="pill-spec"><span class="dot"></span>规格库：未加载</span>
+      <span class="pill" id="pill-yield"><span class="dot"></span>良率数据：未加载</span>
+    </div>
   </div>
-  <div class="header-badges" id="header-badges">
-    <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
-    <span class="pill" id="pill-spec"><span class="dot"></span>规格库：未加载</span>
-    <span class="pill" id="pill-yield"><span class="dot"></span>良率数据：未加载</span>
-  </div>
+  <nav class="tabnav" id="tabnav" aria-label="专区导航">
+    <button class="tab active" data-tab="spectra">光谱对比分析</button>
+    <button class="tab" data-tab="yield">良率分析</button>
+    <button class="tab" data-tab="trends">趋势专题</button>
+    <button class="tab" data-tab="dual">双规格一致性</button>
+    <button class="tab" data-tab="report">良率看板</button>
+    <button class="tab" data-tab="orders">异常工单</button>
+  </nav>
 </header>
-
-<button class="tabnav-toggle" id="tabnav-toggle" title="显示/隐藏专区" aria-expanded="true">专区</button>
-<nav class="tabnav" id="tabnav" aria-label="专区导航">
-  <div class="tabnav-head">专区</div>
-  <button class="tab active" data-tab="spectra">光谱对比分析</button>
-  <button class="tab" data-tab="yield">良率分析</button>
-  <button class="tab" data-tab="trends">趋势专题</button>
-  <button class="tab" data-tab="dual">双规格一致性</button>
-  <button class="tab" data-tab="report">良率看板</button>
-  <button class="tab" data-tab="orders">异常工单</button>
-</nav>
 
 <main class="container">
 
@@ -1507,31 +1503,20 @@ function resizeChartsInActivePanel() {
 }
 
 function setTabnavHidden(hidden) {
+  /* 专区导航已固定在顶部，不再支持隐藏；这里只做「强制显示」，兼容旧逻辑 */
   const nav = document.getElementById('tabnav');
-  const btn = document.getElementById('tabnav-toggle');
-  document.body.classList.toggle('tabnav-hidden', hidden);
-  if (nav) nav.classList.toggle('hidden', hidden);
-  if (btn) {
-    btn.setAttribute('aria-expanded', String(!hidden));
-    btn.textContent = hidden ? '专区' : '收起';
-    btn.title = hidden ? '展开专区' : '隐藏专区';
-  }
-  try { localStorage.setItem('wb-tabnav-hidden', hidden ? '1' : '0'); } catch (e) { /* ignore */ }
+  document.body.classList.remove('tabnav-hidden');
+  if (nav) nav.classList.remove('hidden');
+  try { localStorage.removeItem('wb-tabnav-hidden'); } catch (e) { /* ignore */ }
   setTimeout(resizeChartsInActivePanel, 260);
 }
 
 function initTabnavToggle() {
-  const btn = document.getElementById('tabnav-toggle');
-  let hidden = false;
-  try { hidden = localStorage.getItem('wb-tabnav-hidden') === '1'; } catch (e) { /* ignore */ }
-  setTabnavHidden(hidden);
-  if (btn) btn.addEventListener('click', () => {
-    setTabnavHidden(!document.body.classList.contains('tabnav-hidden'));
-  });
+  setTabnavHidden(false);
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.12.0';
+const VERSION = 'v1.12.1';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
