@@ -448,7 +448,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
     <div class="app-logo">烤</div>
     <div>
       <div class="app-title">光谱与良率分析工作台</div>
-      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.4</div>
+      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.6</div>
     </div>
     <div class="header-badges" id="header-badges">
       <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -957,21 +957,26 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <span class="tool-hint">留空 = 全部 PN；输入按前缀匹配</span>
     </div>
     <div class="chart-tools">
-      <span class="tool-label">日期</span>
-      <input type="date" id="machout-start">
-      <span class="tool-label">~</span>
-      <input type="date" id="machout-end">
-      <span class="quick-range" data-cat="machout">
-        <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
-        <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
-        <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
-      </span>
       <span class="tool-label">视图</span>
       <select id="machout-view">
         <option value="oneday">单日各机台</option>
         <option value="trend">时间趋势</option>
       </select>
+      <span class="tool-label" id="machout-day-label">查看日期</span>
       <input type="date" id="machout-day" title="单日视图中查看哪一天">
+      <button type="button" class="btn btn-sm" id="machout-prev" title="前一天">◀ 前一天</button>
+      <button type="button" class="btn btn-sm" id="machout-next" title="后一天">后一天 ▶</button>
+      <span id="machout-range-wrap">
+        <span class="tool-label">日期范围</span>
+        <input type="date" id="machout-start">
+        <span class="tool-label">~</span>
+        <input type="date" id="machout-end">
+        <span class="quick-range" data-cat="machout">
+          <button type="button" class="btn btn-sm" data-quick="w" title="开始日期 = 结束日期往前 1 周">1 周</button>
+          <button type="button" class="btn btn-sm" data-quick="m" title="开始日期 = 结束日期往前 1 个月">1 月</button>
+          <button type="button" class="btn btn-sm" data-quick="q" title="开始日期 = 结束日期往前 3 个月">3 月</button>
+        </span>
+      </span>
       <span class="tool-label">粒度</span>
       <select id="machout-gran">
         <option value="day">按日</option>
@@ -983,6 +988,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <button type="button" class="btn btn-sm" id="machout-all" title="把全部机台都放进矩阵">全部机台</button>
       <span class="tool-label">合格线</span>
       <input type="number" id="machout-line" min="0" step="100" placeholder="只/天/台" style="width:110px">
+      <button type="button" class="btn btn-sm" id="machout-export" title="按当前合格线和日期范围，导出每天产量低于合格线的一体机">导出不达标 Excel</button>
       <span class="tool-hint">填了按「日均产量 ≥ 合格线」判定；下方矩阵绿=达标、红=未达标</span>
     </div>
     <div class="kpi-strip" id="machout-kpi"></div>
@@ -1572,7 +1578,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.12.4';
+const VERSION = 'v1.12.6';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -6192,6 +6198,8 @@ function bindYieldEvents() {
     state.machOutLine = isFinite(v) && v > 0 ? v : 0;
     renderMachOutChart();
   });
+  const moExport = $('#machout-export');
+  if (moExport) moExport.addEventListener('click', () => { exportMachOutFails(); });
   const moAll = $('#machout-all');
   if (moAll) moAll.addEventListener('click', () => {
     const sel = $('#machout-pick');
@@ -6203,6 +6211,12 @@ function bindYieldEvents() {
   const moView = $('#machout-view');
   if (moView) moView.addEventListener('change', e => {
     state.machOutView = e.target.value === 'trend' ? 'trend' : 'oneday';
+    /* 切到时间趋势时，把选中的单日纳入日期范围，避免图上看不到那一天 */
+    if (state.machOutView === 'trend' && isIsoDate(state.machOutDay)) {
+      const d = state.machOutDay;
+      if (!isIsoDate(state.machOutStart) || state.machOutStart > d) state.machOutStart = d;
+      if (!isIsoDate(state.machOutEnd) || state.machOutEnd < d) state.machOutEnd = d;
+    }
     renderMachOutChart();
   });
   const moDay = $('#machout-day');
@@ -6210,6 +6224,21 @@ function bindYieldEvents() {
     state.machOutDay = e.target.value || '';
     renderMachOutChart();
   });
+  const shiftMoDay = n => {
+    const dd = state.yieldData;
+    if (!dd) return;
+    const cur = isIsoDate(state.machOutDay) ? state.machOutDay : dd.dateMax;
+    let nx = addDays(cur, n);
+    if (nx < dd.dateMin) nx = dd.dateMin;
+    if (nx > dd.dateMax) nx = dd.dateMax;
+    if (nx === cur) return;
+    state.machOutDay = nx;
+    renderMachOutChart();
+  };
+  const moPrev = $('#machout-prev');
+  if (moPrev) moPrev.addEventListener('click', () => shiftMoDay(-1));
+  const moNext = $('#machout-next');
+  if (moNext) moNext.addEventListener('click', () => shiftMoDay(1));
   const ovEnd = $('#overall-end');
   if (ovEnd) ovEnd.addEventListener('change', e => {
     state.overallEnd = e.target.value || '';
@@ -8435,6 +8464,126 @@ function renderMachTrendChart() {
   }
 }
 
+/* ---------- 导出：每天产量低于合格线的一体机 ---------- */
+async function exportMachOutFails() {
+  const d = state.yieldData;
+  if (!d) { toast('请先导入产能登记表', 'warn'); return; }
+  const line = Number(state.machOutLine);
+  if (!isFinite(line) || line <= 0) { toast('请先在上面「合格线」填一个数（只/天/台），再导出', 'warn'); return; }
+
+  const gs = d.dateMin, ge = d.dateMax;
+  let ms = isIsoDate(state.machOutStart) ? state.machOutStart : addDays(ge, -29);
+  let me = isIsoDate(state.machOutEnd) ? state.machOutEnd : ge;
+  if (ms < gs) ms = gs;
+  if (me > ge) me = ge;
+  if (!ms || !me || ms > me) { ms = addDays(ge, -29); me = ge; }
+  /* 单日视图：只导那一天；时间趋势：导当前日期范围 */
+  if (state.machOutView !== 'trend') {
+    let day = isIsoDate(state.machOutDay) ? state.machOutDay : ge;
+    if (day < gs) day = gs;
+    if (day > ge) day = ge;
+    ms = me = day;
+  }
+
+  const pn = String(state.machOutPN || '').trim().toLowerCase();
+  const matchPN = r => !pn || String(r.PN || '').trim().toLowerCase().startsWith(pn);
+  const rows = d.rows.filter(r => r.date >= ms && r.date <= me && matchPN(r));
+  if (!rows.length) { toast('当前日期范围 / PN 下没有数据', 'warn'); return; }
+
+  const machineSet = new Set();
+  const byKey = new Map();
+  for (const r of rows) {
+    const m = String(r.一体机 || '').trim();
+    if (!m) continue;
+    machineSet.add(m);
+    const k = r.date + '||' + m;
+    const arr = byKey.get(k);
+    if (arr) arr.push(r); else byKey.set(k, [r]);
+  }
+  const machines = [...machineSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (!machines.length) { toast('没有可统计的一体机', 'warn'); return; }
+
+  const dates = [];
+  for (let t = ms; t <= me; t = addDays(t, 1)) dates.push(t);
+
+  const detail = [];
+  const perM = new Map(machines.map(m => [m, { m, bad: 0, days: 0, sum: 0, min: null, max: null }]));
+  for (const dt of dates) {
+    for (const m of machines) {
+      const rs = byKey.get(dt + '||' + m) || [];
+      if (!rs.length) continue;
+      const a = agg(rs);
+      const st = perM.get(m);
+      st.days++; st.sum += a.total;
+      st.min = st.min === null ? a.total : Math.min(st.min, a.total);
+      st.max = st.max === null ? a.total : Math.max(st.max, a.total);
+      if (a.total < line) {
+        st.bad++;
+        detail.push({
+          dt, m, total: a.total, gap: line - a.total,
+          yieldRate: a.yieldRate === null ? '' : round(a.yieldRate * 100, 2),
+          ng: a.ng, wl: a.wlLong
+        });
+      }
+    }
+  }
+
+  if (!detail.length) { toast(`没有不达标记录：${ms} ~ ${me} 所有机台都 ≥ ${line.toLocaleString()}`, 'success'); return; }
+
+  detail.sort((a, b) => (a.dt === b.dt ? a.total - b.total : (a.dt < b.dt ? 1 : -1)));
+
+  const head = ['日期', '一体机', '产量（只）', '合格线', '差额（只）', '良率（%）', 'NG', '波长长'];
+  const body = detail.map(x => [x.dt, x.m, x.total, line, x.gap, x.yieldRate, x.ng, x.wl]);
+
+  const ws1 = XLSX.utils.aoa_to_sheet([head].concat(body));
+  ws1['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+
+  const summary = [...perM.values()]
+    .filter(x => x.days > 0)
+    .sort((a, b) => (b.bad - a.bad) || (a.m.localeCompare(b.m, undefined, { numeric: true })))
+    .map(x => {
+      const zero = dates.length - x.days;
+      return [
+        x.m, x.bad, x.days, zero,
+        round(x.bad / x.days * 100, 1),
+        x.days ? Math.round(x.sum / x.days) : 0,
+        x.min === null ? '' : x.min,
+        x.max === null ? '' : x.max
+      ];
+    });
+  const ws2 = XLSX.utils.aoa_to_sheet([['一体机', '不达标天数', '有生产天数', '无生产天数', '不达标率（%）', '日均产量', '最低日产量', '最高日产量']].concat(summary));
+  ws2['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+
+  const ws3 = XLSX.utils.aoa_to_sheet([
+    ['项目', '值'],
+    ['日期范围', `${ms} ~ ${me}（${dates.length} 天）`],
+    ['PN', pn ? state.machOutPN : '全部'],
+    ['合格线', `${line.toLocaleString()} 只/天/台`],
+    ['不达标记录', `${detail.length} 条`],
+    ['机台数', `${machines.length} 台`],
+    ['判定', '当天该机台测试总数 < 合格线 → 记一条；当天无记录不算不达标（“无生产天数”另列）'],
+    ['导出时间', new Date().toLocaleString()]
+  ]);
+  ws3['!cols'] = [{ wch: 14 }, { wch: 70 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, '不达标明细');
+  XLSX.utils.book_append_sheet(wb, ws2, '按机台汇总');
+  XLSX.utils.book_append_sheet(wb, ws3, '说明');
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+  try {
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const base = `一体机不达标_${ms}_${me}`;
+    const target = await pickSaveTarget(base, '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Excel 工作簿');
+    if (target && target.cancelled) return;
+    await writeSaveTarget(target, blob);
+    toast(`已导出 ${detail.length} 条不达标记录（${ms} ~ ${me}，合格线 ${line.toLocaleString()}）`, 'success');
+  } catch (e) {
+    toast('导出失败：' + (e.message || e), 'error');
+  }
+}
+
 /* ---------- 一体机产量（日 / 周 / 月） ---------- */
 function renderMachOutChart() {
   const el = $('#machout-chart');
@@ -8471,26 +8620,28 @@ function renderMachOutChart() {
   if (endEl) { endEl.min = gs; endEl.max = ge; endEl.value = me; }
 
   const rangeRows = yieldRowsInRange(ms, me);
-  if (!rangeRows.length) {
+  const isOneView = state.machOutView !== 'trend';
+  if (!rangeRows.length && !isOneView) {
     showEmpty('machout-chart', '所选日期范围内无数据。');
     clearAll();
     return;
   }
 
   /* PN 选择：留空 = 全部；常用 PN 置顶 */
+  const pnScope = (isOneView || !rangeRows.length) ? d.rows : rangeRows;
   const pnInput = $('#machout-pn');
   const pnList = $('#machout-pn-options');
-  const pnAgg = groupAgg(rangeRows, r => pnKey(r.PN)).filter(x => x.k && x.k !== '（空）').sort((a, b) => b.total - a.total);
+  const pnAgg = groupAgg(pnScope, r => pnKey(r.PN)).filter(x => x.k && x.k !== '（空）').sort((a, b) => b.total - a.total);
   const pnAvail = new Set(pnAgg.map(x => x.k));
   if (pnList) pnList.innerHTML = pnAgg.map(x => `<option value="${esc(x.k)}">${esc(x.k)}（${x.total.toLocaleString()}）</option>`).join('');
   let pn = String(state.machOutPN || '').trim();
-  if (pn && !pnAvail.has(pn) && !rangeRows.some(r => String(r.PN || '').trim().toLowerCase().startsWith(pn.toLowerCase()))) pn = '';
+  if (pn && !pnAvail.has(pn) && !pnScope.some(r => String(r.PN || '').trim().toLowerCase().startsWith(pn.toLowerCase()))) pn = '';
   state.machOutPN = pn;
   if (pnInput && pnInput.value !== pn) pnInput.value = pn;
   const matchPN = r => !pn || String(r.PN || '').trim().toLowerCase().startsWith(pn.toLowerCase());
-  const rows = rangeRows.filter(matchPN);
+  const rows = (isOneView ? d.rows : rangeRows).filter(matchPN);
   if (!rows.length) {
-    showEmpty('machout-chart', `PN「${pn}」在所选日期范围内没有一体机记录。`);
+    showEmpty('machout-chart', `PN「${pn}」在当前数据里没有一体机记录。`);
     clearAll();
     return;
   }
@@ -8556,17 +8707,24 @@ function renderMachOutChart() {
 
   /* 视图：单日各机台（默认） / 时间趋势 */
   const view = state.machOutView === 'trend' ? 'trend' : 'oneday';
+  const isOne = view === 'oneday';
   const viewSel = $('#machout-view');
   if (viewSel && viewSel.value !== view) viewSel.value = view;
   const dayEl = $('#machout-day');
-  let day = isIsoDate(state.machOutDay) ? state.machOutDay : me;
-  if (day < ms) day = ms;
-  if (day > me) day = me;
+  const lastDay = rows.reduce((m, r) => (r.date > m ? r.date : m), '');
+  let day = isIsoDate(state.machOutDay) ? state.machOutDay : (lastDay || me);
+  if (day < gs) day = gs;
+  if (day > ge) day = ge;
   state.machOutDay = day;
-  if (dayEl) {
-    dayEl.min = ms; dayEl.max = me; dayEl.value = day;
-    dayEl.style.display = view === 'oneday' ? '' : 'none';
-  }
+  const rangeWrap = $('#machout-range-wrap');
+  const dayLabel = $('#machout-day-label');
+  const prevBtn = $('#machout-prev');
+  const nextBtn = $('#machout-next');
+  if (dayEl) { dayEl.min = gs; dayEl.max = ge; dayEl.value = day; dayEl.style.display = isOne ? '' : 'none'; }
+  if (dayLabel) dayLabel.style.display = isOne ? '' : 'none';
+  if (prevBtn) prevBtn.style.display = isOne ? '' : 'none';
+  if (nextBtn) nextBtn.style.display = isOne ? '' : 'none';
+  if (rangeWrap) rangeWrap.style.display = isOne ? 'none' : '';
   const granSel = $('#machout-gran');
   if (granSel) granSel.style.display = view === 'oneday' ? 'none' : '';
   const granLabel = granSel && granSel.previousElementSibling;
@@ -8812,6 +8970,9 @@ function renderMachOutChart() {
   }
 
   if (tableWrap) {
+    if (view === 'oneday') {
+      tableWrap.innerHTML = '';   /* 单日视图由上面的机台表覆盖，这里不重复显示区间汇总 */
+    } else {
     const totalAll = picked.total || 1;
     const rowsHtml = machines.map(m => {
       const sel = picks.includes(m.k);
@@ -8838,6 +8999,7 @@ function renderMachOutChart() {
       (line > 0 ? `<th class="num">达标${granText}数</th><th class="num">达标率</th>` : '') +
       `</tr></thead>
       <tbody>${rowsHtml}</tbody></table></div>`;
+    }
   }
 
   if (note) {
