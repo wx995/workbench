@@ -523,8 +523,29 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       </div>
     </div>
     <div class="box-body">
-      <div class="box-note" id="dbpf-note-top">Ripple 口径：每通道以规格窗口内的实测峰值为中心、取规格通带宽度，只统计高于「峰值 − 取段电平」的连续段（电平见右上角）。电平越小越只看平坦顶，波长偏短时不会被两侧陡降带出假性大 ripple。</div>
-      <div class="kpi-strip" id="dbpf-kpi"></div>
+      <div id="dbpf-export-panel" style="display:none;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin:0 0 10px;background:var(--bg-subtle)">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px">
+          <span class="panel-title" style="margin:0">导出内容</span>
+          <span>分区：<span id="dbpf-exp-stages"></span></span>
+          <span>通道：<span id="dbpf-exp-chans"></span></span>
+        </div>
+        <div style="margin-top:6px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px">
+          <span class="panel-title" style="margin:0">列</span>
+          <span id="dbpf-exp-cols"></span>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px">
+          <label class="chk-inline">行
+            <select id="dbpf-exp-rows" class="sel-sm">
+              <option value="all">全部腔位</option>
+              <option value="bad">仅超规格（现测或移位）</option>
+              <option value="out">仅异常剔除</option>
+            </select>
+          </label>
+          <button class="btn btn-sm btn-primary" id="dbpf-exp-go">导出</button>
+          <button class="btn btn-sm" id="dbpf-exp-cancel">取消</button>
+        </div>
+      </div>
+      <div class="box-note" id="dbpf-note-top">Ripple 口径：每通道以规格窗口内的实测峰值为中心、取规格通带宽度，只统计高于「峰值 − 取段电平」的连续段（电平见右上角）。电平越小越只看平坦顶，波长偏短时不会被两侧陡降带出假性大 ripple。</div>      <div class="kpi-strip" id="dbpf-kpi"></div>
       <div class="chart-wrap"><div id="dbpf-chart" style="height:360px"></div></div>
       <div class="chart-note" id="dbpf-note"></div>
       <div id="dbpf-table"></div>
@@ -1806,7 +1827,22 @@ function bindSpectraEvents() {
   $('#focus-custom').addEventListener('input', onFocusChange);
   $('#btn-export-compare').addEventListener('click', exportCompareTable);
   const dbpfBtn = $('#dbpf-export');
-  if (dbpfBtn) dbpfBtn.addEventListener('click', exportDbpf);
+  if (dbpfBtn) dbpfBtn.addEventListener('click', () => {
+    const p = $('#dbpf-export-panel');
+    if (!p) return;
+    p.style.display = p.style.display === 'none' ? '' : 'none';
+  });
+  const dbpfGo = $('#dbpf-exp-go');
+  if (dbpfGo) dbpfGo.addEventListener('click', () => {
+    exportDbpf(dbpfExportOpts());
+    const p = $('#dbpf-export-panel');
+    if (p) p.style.display = 'none';
+  });
+  const dbpfCancel = $('#dbpf-exp-cancel');
+  if (dbpfCancel) dbpfCancel.addEventListener('click', () => {
+    const p = $('#dbpf-export-panel');
+    if (p) p.style.display = 'none';
+  });
   const dbpfLevel = $('#dbpf-level');
   if (dbpfLevel) dbpfLevel.addEventListener('change', e => {
     state.dbpfLevel = Number(e.target.value) > 0 ? Number(e.target.value) : 0.5;
@@ -5998,6 +6034,9 @@ function dbpfStageName(st, i) {
   return String(st.name || ('分区' + (i + 1)));
 }
 
+/* 导出上下文：render 时缓存，供「导出」按钮按勾选项生成 */
+let dbpfCtx = null;
+
 function dbpfCollect() {
   const spec = currentSpec();
   const ch = spec ? dbpfChannels(spec.spec) : null;
@@ -6308,9 +6347,24 @@ function renderDbpfPanel() {
       `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
+  /* 缓存上下文给导出用 */
+  dbpfCtx = { spec, ch, rows, stagesUse, band, isOut, outKeys, level, stA, stB };
+
+  /* 导出面板：分区 / 通道 / 列 / 行 */
+  const expS = $('#dbpf-exp-stages');
+  if (expS) expS.innerHTML = stagesUse.map(s => `<label class="chk-inline" style="margin-right:10px"><input type="checkbox" data-exp-stage="${esc(s.id)}" checked>${esc(s.name)}</label>`).join('');
+  const expC = $('#dbpf-exp-chans');
+  if (expC && !expC.innerHTML) expC.innerHTML = [0, 1].map(i => `<label class="chk-inline" style="margin-right:10px"><input type="checkbox" data-exp-ch="${i}" checked>通道${i + 1}</label>`).join('');
+  const expCols = $('#dbpf-exp-cols');
+  if (expCols && !expCols.innerHTML) {
+    const defs = [['cw', 'CW'], ['il', 'IL'], ['ripple', 'Ripple 现测'], ['aligned', 'Ripple 移位'], ['delta', 'Δ（S2−S1）'], ['judge', '判定'], ['iso', '隔离度']];
+    expCols.innerHTML = defs.map(([k, lbl]) =>
+      `<label class="chk-inline" style="margin-right:10px"><input type="checkbox" data-exp-col="${k}"${['ripple', 'aligned', 'judge'].includes(k) ? ' checked' : ''}>${lbl}</label>`
+    ).join('');
+  }
+
   if (note) {
-    const lastSt = stagesUse[stagesUse.length - 1];
-    const n1 = rows.filter(r => { const v = valOk(r, lastSt, 0); return v !== null && band[0].ripple !== null && v > band[0].ripple + 1e-9; }).length;
+    const lastSt = stagesUse[stagesUse.length - 1];    const n1 = rows.filter(r => { const v = valOk(r, lastSt, 0); return v !== null && band[0].ripple !== null && v > band[0].ripple + 1e-9; }).length;
     const n2 = rows.filter(r => { const v = valOk(r, lastSt, 1); return v !== null && band[1].ripple !== null && v > band[1].ripple + 1e-9; }).length;
     note.innerHTML = `共 ${rows.length} 个腔位，DUO 的 ${esc(stA.name)} ⇄ ${esc(stB.name)}。` +
       `Ripple 口径：主数为「现测」——以规格窗口内实测峰值为中心，量「峰值 − ${level} dB」宽度、两侧各收 10%，再与规格窗口取交集；格子下方小字为「移位后」——把整条曲线平移到规格中心后再在规格窗口内算，用来排掉波长偏移带来的假性偏大。` +
@@ -6323,46 +6377,133 @@ function renderDbpfPanel() {
   }
 }
 
-/* 导出双通道明细 */
-function exportDbpf() {
-  const data = dbpfCollect();
-  if (!data) { toast('当前规格不是双通道（缺 T1/T2），无法导出', 'warn'); return; }
-  const { spec, ch, sts, rows, level } = data;
-  if (!rows.length) { toast('还没有分区数据', 'warn'); return; }
+/* 读取导出勾选项 */
+function dbpfExportOpts() {
+  const stages = Array.from(document.querySelectorAll('[data-exp-stage]:checked')).map(x => x.dataset.expStage);
+  const chans = Array.from(document.querySelectorAll('[data-exp-ch]:checked')).map(x => Number(x.dataset.expCh));
+  const cols = Array.from(document.querySelectorAll('[data-exp-col]:checked')).map(x => x.dataset.expCol);
+  const rowMode = ($('#dbpf-exp-rows') || {}).value || 'all';
+  return {
+    stages: stages.length ? stages : null,
+    chans: chans.length ? chans : [0, 1],
+    cols: cols.length ? cols : ['ripple'],
+    rowMode
+  };
+}
+
+/* 导出双通道明细（按勾选的分区 / 通道 / 列 / 行） */
+function exportDbpf(opts) {
+  const ctx = typeof dbpfCtx !== 'undefined' ? dbpfCtx : null;
+  if (!ctx) { toast('当前规格不是双通道（缺 T1/T2），无法导出', 'warn'); return; }
+  const { spec, ch, rows, stagesUse, band, isOut, level } = ctx;
+  const o = opts || dbpfExportOpts();
+  const useStages = stagesUse.filter(s => !o.stages || o.stages.includes(s.id));
+  if (!useStages.length) { toast('请至少勾选一个分区', 'warn'); return; }
+  const chans = o.chans;
+  const has = k => o.cols.includes(k);
+  const two = useStages.length > 1;
+
+  const mOf = (r, st, bi) => {
+    const p = r.per[st.id];
+    return p ? (bi === 0 ? p.m1 : p.m2) : null;
+  };
+
+  const keep = r => {
+    if (o.rowMode === 'out') return chans.some(bi => useStages.some(st => isOut(r, st, bi)));
+    if (o.rowMode === 'bad') {
+      return chans.some(bi => useStages.some(st => {
+        const m = mOf(r, st, bi);
+        if (!m) return false;
+        const lim = band[bi].ripple;
+        return lim !== null && ((m.ripple !== null && m.ripple > lim + 1e-9)
+          || (m.rippleAligned !== null && m.rippleAligned !== undefined && m.rippleAligned > lim + 1e-9));
+      }));
+    }
+    return true;
+  };
+  const rowsOut = rows.filter(keep);
+  if (!rowsOut.length) { toast('按当前筛选没有可导出的行', 'warn'); return; }
+
   const head = ['腔位'];
-  sts.forEach(st => {
-    ch.bands.forEach(b => head.push(`${st.name || ''} ${b.name} CW`, `${st.name || ''} ${b.name} IL`, `${st.name || ''} ${b.name} Ripple`));
-    head.push(`${st.name || ''} 截止带最小隔离`);
-  });
-  const body = rows.map(r => {
-    const line = [r.cavity];
-    sts.forEach(st => {
-      const p = r.per[st.id];
-      ch.bands.forEach((b, bi) => {
-        const m = bi === 0 ? (p && p.m1) : (p && p.m2);
-        line.push(m ? round(m.cw, 2) : '', m ? round(m.il, 2) : '', m && m.ripple !== null ? round(m.ripple, 3) : '');
-      });
-      const isos = (p ? (p.s1 || []) : []).map(x => x.iso).filter(v => v !== null);
-      line.push(isos.length ? round(Math.min(...isos), 1) : '');
+  useStages.forEach(st => {
+    chans.forEach(bi => {
+      const tag = `${st.name} 通${bi + 1}`;
+      if (has('cw')) head.push(`${tag} CW`);
+      if (has('il')) head.push(`${tag} IL`);
+      if (has('ripple')) head.push(`${tag} Ripple现测`);
+      if (has('aligned')) head.push(`${tag} Ripple移位`);
+      if (has('judge')) head.push(`${tag} 判定`);
     });
+    if (has('iso')) head.push(`${st.name} 最小隔离`);
+  });
+  if (two && has('delta')) {
+    chans.forEach(bi => {
+      head.push(`${useStages[1].name}−${useStages[0].name} 通${bi + 1} Δ现测`);
+      head.push(`${useStages[1].name}−${useStages[0].name} 通${bi + 1} Δ移位`);
+    });
+  }
+  head.push('备注');
+
+  const body = rowsOut.map(r => {
+    const line = [r.cavity];
+    useStages.forEach(st => {
+      chans.forEach(bi => {
+        const m = mOf(r, st, bi);
+        if (has('cw')) line.push(m ? round(m.cw, 2) : '');
+        if (has('il')) line.push(m ? round(m.il, 2) : '');
+        if (has('ripple')) line.push(m && m.ripple !== null ? round(m.ripple, 3) : '');
+        if (has('aligned')) line.push(m && m.rippleAligned !== null && m.rippleAligned !== undefined ? round(m.rippleAligned, 3) : '');
+        if (has('judge')) {
+          const p = r.per[st.id];
+          const stopsM = p ? (bi === 0 ? p.s1 : p.s2) : [];
+          if (!m || isOut(r, st, bi)) line.push('异常剔除');
+          else {
+            const bn = dbpfJudge(m, band[bi], stopsM);
+            const ba = dbpfJudge(m, band[bi], stopsM, m.rippleAligned);
+            line.push(`${bn.length ? 'NG' : 'OK'} / ${ba.length ? 'NG' : 'OK'}`);
+          }
+        }
+      });
+      if (has('iso')) {
+        const p = r.per[st.id];
+        const isos = (p ? (p.s1 || []) : []).map(x => x.iso).filter(v => v !== null);
+        line.push(isos.length ? round(Math.min.apply(null, isos), 1) : '');
+      }
+    });
+    if (two && has('delta')) {
+      chans.forEach(bi => {
+        const a = mOf(r, useStages[0], bi), b = mOf(r, useStages[1], bi);
+        const d1 = (a && b && a.ripple !== null && b.ripple !== null) ? b.ripple - a.ripple : null;
+        const d2 = (a && b && a.rippleAligned !== null && a.rippleAligned !== undefined
+          && b.rippleAligned !== null && b.rippleAligned !== undefined) ? b.rippleAligned - a.rippleAligned : null;
+        line.push(d1 === null ? '' : round(d1, 3), d2 === null ? '' : round(d2, 3));
+      });
+    }
+    line.push(chans.some(bi => useStages.some(st => isOut(r, st, bi))) ? '异常剔除' : '');
     return line;
   });
+
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([head].concat(body));
-  ws['!cols'] = head.map((h, i) => ({ wch: i === 0 ? 10 : 16 }));
+  ws['!cols'] = head.map((h, i) => ({ wch: i === 0 ? 10 : Math.max(12, String(h).length + 2) }));
   XLSX.utils.book_append_sheet(wb, ws, '双通道明细');
+
   const desc = XLSX.utils.aoa_to_sheet([
     ['项目', '值'],
     ['规格', spec.name || ''],
     ['通道1', `${ch.bands[0].start} ~ ${ch.bands[0].end} nm，IL ≤ ${ch.bands[0].il}，Ripple ≤ ${ch.bands[0].ripple}`],
     ['通道2', `${ch.bands[1].start} ~ ${ch.bands[1].end} nm，IL ≤ ${ch.bands[1].il}，Ripple ≤ ${ch.bands[1].ripple}`],
-    ['Ripple 口径', `每通道以规格窗口内实测峰值为中心、取规格通带宽度，只统计高于峰值 − ${level} dB 的连续段`],
+    ['分区', useStages.map(s => s.name).join(' / ')],
+    ['行筛选', o.rowMode === 'all' ? '全部腔位' : o.rowMode === 'bad' ? '仅超规格（现测或移位）' : '仅异常剔除'],
+    ['判定列', '现测 / 移位（OK 或 NG）'],
+    ['Ripple 现测', `以峰值为中心、量「峰值 − ${level} dB」宽度、两侧各收 10%，与规格窗口取交集`],
+    ['Ripple 移位', '把曲线平移到规格中心（按实测通带中点对齐）后在规格窗口内算'],
     ['导出时间', new Date().toLocaleString()]
   ]);
   desc['!cols'] = [{ wch: 12 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, desc, '说明');
-  XLSX.writeFile(wb, safeFileName('双通道规格_' + (spec.pn || spec.name || '') + '.xlsx'));
-  toast('已导出双通道明细（' + rows.length + ' 个腔位）', 'success');
+  XLSX.writeFile(wb, safeFileName('双通道_' + (spec.pn || spec.name || '') + '_' + useStages.map(s => s.name).join('+') + '.xlsx'));
+  toast('已导出 ' + rowsOut.length + ' 个腔位（' + useStages.map(s => s.name).join(' + ') + '）', 'success');
 }
 
 /* ---------- 选择规格 ---------- */
