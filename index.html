@@ -569,7 +569,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   </div>
 
   <div class="grid-2">
-    <div class="box">
+    <div class="box" id="compare-box">
       <div class="box-header">
         <h3>腔位参数对比</h3>
         <div class="box-actions">
@@ -2974,6 +2974,29 @@ function bandwidthDrop() {
 
 function stageParamValue(st, cavity, pname) {
   if (pname === '中心波长' && isEdgeSpec()) return null;   // SWP / LWP 不看中心波长
+  /* 双通带规格：Ripple / MaxIL / Isolation 直接按光谱的两个通道重算（参数文件里只有单通道口径） */
+  const _cur = currentSpec();
+  const _db = _cur ? dbpfChannels(_cur.spec) : null;
+  if (_db && (pname === 'Ripple' || pname === 'MaxIL' || pname === 'Isolation' || pname === '带宽')) {
+    const d = st.data.get(cavity);
+    if (!d) return null;
+    const lv = Number(state.dbpfLevel) > 0 ? Number(state.dbpfLevel) : 0.5;
+    const m1 = dbpfBandMetrics(d, _db.bands[0], lv);
+    const m2 = dbpfBandMetrics(d, _db.bands[1], lv);
+    if (pname === 'Ripple') {
+      const vs = [m1 && m1.ripple, m2 && m2.ripple].filter(v => v !== null && v !== undefined);
+      return vs.length ? round(Math.max.apply(null, vs), 3) : null;
+    }
+    if (pname === 'MaxIL') {
+      const vs = [m1 && m1.il, m2 && m2.il].filter(v => v !== null && v !== undefined);
+      return vs.length ? round(Math.max.apply(null, vs), 3) : null;
+    }
+    if (pname === 'Isolation') {
+      const isos = dbpfStopMetrics(d, _db.stops).map(x => x.iso).filter(v => v !== null);
+      return isos.length ? round(Math.min.apply(null, isos), 3) : null;
+    }
+    return null;   // 带宽：双通带不适用
+  }
   /* 边带规格的波长距离：曲线沿波长轴平移到规格限值线所需的量 */
   if (isEdgeDistParam(pname)) {
     const em = edgeSpecMetrics(currentSpec());
@@ -3536,8 +3559,90 @@ function edgeCurveMetrics(d, m) {
   };
 }
 
+/* ---------- DBPF（双通带）规格线：两个透射窗口 + IL/Ripple 线 + 三个截止带 ---------- */
+function buildDbpfOverlay(spec, frame) {
+  const raw = spec && spec.spec ? spec.spec : (spec || {});
+  const db = dbpfChannels(raw);
+  if (!db) return { series: [], note: '' };
+  const x0 = Number(frame.x0), x1 = Number(frame.x1);
+  const peak = isFinite(Number(frame.peak)) ? Number(frame.peak) : 0;
+  const series = [], marks = [], areas = [], note = [];
+  const f2 = v => isFinite(v) ? round(v, 2) : '—';
+  const LBL_BG = { backgroundColor: 'rgba(255,255,255,0.82)', padding: [1, 3], borderRadius: 2 };
+  const inView = w => isFinite(w) && w >= x0 - 1e-9 && w <= x1 + 1e-9;
+
+  const addH = (name, a, b, y, color, opt) => {
+    if (!isFinite(y)) return;
+    if (isFinite(a) && isFinite(b) && b > a) {
+      series.push({
+        id: '__dbpf-h' + series.length, name: '__dbpf-h' + series.length,
+        type: 'line',
+        data: [[round(a, 4), round(y, 4)], [round(b, 4), round(y, 4)]],
+        showSymbol: false, silent: true, tooltip: { show: false }, legendHoverLink: false,
+        lineStyle: { color, width: (opt && opt.width) || 1.2, type: (opt && opt.type) || 'dashed' },
+        z: 3
+      });
+    }
+    if (opt && opt.noLabel) return;
+    marks.push({
+      yAxis: round(y, 4),
+      lineStyle: { color: 'transparent', width: 1 },
+      label: {
+        show: true, formatter: name, position: (opt && opt.pos) || 'insideEndTop',
+        color, fontSize: 10, distance: 3, ...LBL_BG
+      }
+    });
+  };
+
+  db.bands.forEach((b, i) => {
+    const lo = Math.max(b.start, x0), hi = Math.min(b.end, x1);
+    if (hi > lo) areas.push([
+      { xAxis: b.start, itemStyle: { color: 'rgba(9,105,218,0.05)' } },
+      { xAxis: b.end }
+    ]);
+    [b.start, b.end].forEach((w, k) => {
+      if (!inView(w)) return;
+      marks.push({
+        xAxis: round(w, 4),
+        lineStyle: { color: '#0969da', type: 'dashed', width: 1 },
+        label: k === 0
+          ? { show: true, formatter: `T${i + 1} ${f2(b.start)}–${f2(b.end)}`, position: 'insideEndTop', color: '#0969da', fontSize: 10, ...LBL_BG }
+          : { show: false }
+      });
+    });
+    if (isFinite(b.il)) addH(`MaxIL ≤ ${f2(b.il)}`, b.start, b.end, peak - b.il, '#9a6700', { pos: 'insideStartTop' });
+    if (isFinite(b.ripple)) addH(`Ripple ≤ ${f2(b.ripple)}`, b.start, b.end, peak - b.ripple, '#bf3989', { pos: 'insideEndBottom' });
+    note.push(`T${i + 1} ${f2(b.start)}–${f2(b.end)} nm：IL ≤ ${f2(b.il)}、Ripple ≤ ${f2(b.ripple)}`);
+  });
+
+  db.stops.forEach(s => {
+    if (!inView(s.start) && !inView(s.end)) return;
+    if (s.end > s.start) areas.push([
+      { xAxis: s.start, itemStyle: { color: 'rgba(207,34,46,0.05)' } },
+      { xAxis: s.end }
+    ]);
+    addH(`${s.name} 隔离 ≥ ${f2(s.limit)}`, s.start, s.end, peak - s.limit, '#cf222e', { pos: 'insideEndBottom', type: 'dotted' });
+    note.push(`${s.name} ${f2(s.start)}–${f2(s.end)}：隔离 ≥ ${f2(s.limit)} dB`);
+  });
+
+  if (marks.length || areas.length) {
+    series.unshift({
+      id: '__dbpf-guide', name: '__dbpf-guide', type: 'line',
+      data: [[round(x0, 4), round(peak, 4)]],
+      showSymbol: false, silent: true, tooltip: { show: false }, legendHoverLink: false,
+      lineStyle: { opacity: 0 }, itemStyle: { opacity: 0 },
+      markLine: marks.length ? { symbol: 'none', silent: true, animation: false, label: { show: false }, data: marks } : undefined,
+      markArea: areas.length ? { silent: true, data: areas } : undefined,
+      z: 1
+    });
+  }
+  return { series, note: note.join(' · ') };
+}
+
 /* 按当前规格值生成图上的规格线（CW / 带宽粗红线 / MaxIL / Ripple / -3dB 刻度） */
 function buildSpecOverlay(spec, frame) {
+  const rawSpec = spec && spec.spec ? spec.spec : spec;
+  if (dbpfChannels(rawSpec)) return buildDbpfOverlay(spec, frame);
   const em = edgeSpecMetrics(spec);
   if (em) return buildEdgeOverlay(spec, em, frame);
   const m = specLineMetrics(spec);
@@ -5913,7 +6018,13 @@ function renderDbpfPanel() {
   const box = $('#dbpf-box');
   if (!box) return;
   const data = dbpfCollect();
-  if (!data) { box.style.display = 'none'; return; }
+  const cbox = document.getElementById('compare-box');
+  if (!data) {
+    box.style.display = 'none';
+    if (cbox) cbox.style.display = '';
+    return;
+  }
+  if (cbox) cbox.style.display = 'none';
   const { spec, ch, sts, rows, level } = data;
   box.style.display = '';
   const levelSel = $('#dbpf-level');
