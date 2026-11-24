@@ -6308,7 +6308,7 @@ function renderDbpfPanel() {
   const head = `<tr><th>腔位</th>` +
     [0, 1].map(bi =>
       `<th class="num">通道${bi + 1}<br>${esc(stA.name)}</th>` +
-      (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ<br>通道${bi + 1}</th>` : '')
+      (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ 现测<br>通道${bi + 1}</th><th class="num">Δ 移位<br>通道${bi + 1}</th>` : '')
     ).join('') +
     `<th>判定（${esc(stB.name)}）<br>现测 / 移位</th></tr>`;
   const body = rows.map(r => {
@@ -6318,7 +6318,18 @@ function renderDbpfPanel() {
         html += cellHtml(r, stB, bi);
         const a = valOk(r, stA, bi), b = valOk(r, stB, bi);
         const d = (a !== null && b !== null) ? b - a : null;
-        html += `<td class="num" style="color:${d === null ? '#8c959f' : d > 0 ? '#cf222e' : '#1a7f37'}">${d === null ? '—' : (d >= 0 ? '+' : '') + round(d, 3)}</td>`;
+        const fmtD = v => v === null ? '—' : (v >= 0 ? '+' : '') + round(v, 3);
+        const colD = v => v === null ? '#8c959f' : v > 0 ? '#cf222e' : '#1a7f37';
+        html += `<td class="num" style="color:${colD(d)}">${fmtD(d)}</td>`;
+        /* 移位后的变化：两端都要有值、且都不是异常剔除 */
+        const pa = r.per[stA.id], pb = r.per[stB.id];
+        const ma = pa ? (bi === 0 ? pa.m1 : pa.m2) : null;
+        const mb = pb ? (bi === 0 ? pb.m1 : pb.m2) : null;
+        const da = (ma && mb && ma.rippleAligned !== null && ma.rippleAligned !== undefined
+          && mb.rippleAligned !== null && mb.rippleAligned !== undefined
+          && !isOut(r, stA, bi) && !isOut(r, stB, bi))
+          ? mb.rippleAligned - ma.rippleAligned : null;
+        html += `<td class="num" style="color:${colD(da)}">${fmtD(da)}</td>`;
       }
       return html;
     }).join('');
