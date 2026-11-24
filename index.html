@@ -508,6 +508,14 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
           <span>⇄</span>
           <select id="dbpf-stage-b" class="sel-sm"></select>
         </label>
+        <label class="chk-inline" title="图形显示哪个口径：现测 / 移位后 / 两条一起">图
+          <select id="dbpf-chart-mode" class="sel-sm">
+            <option value="now">现测</option>
+            <option value="aligned">移位后</option>
+            <option value="both">两者</option>
+          </select>
+        </label>
+        <button class="btn btn-sm" id="dbpf-chart-export" title="把当前这张 Ripple 图导出为 PNG">导出图</button>
         <label class="chk-inline" title="按中位数 ± 3.5×MAD 剔除明显偏离的 ripple（比如个别 2~8 dB 的毛刺），不影响原始数据">
           <input type="checkbox" id="dbpf-exclude" checked> 排除异常
         </label>
@@ -1438,6 +1446,7 @@ const state = {
   specOverride: null,  // 当前规格的用户编辑 {field:value}
   dbpfLevel: 0.5,      // 双通道 Ripple 取段电平（峰值 − N dB）
   dbpfExclude: true,   // 双通道：按 3.5×MAD 剔除明显异常
+  dbpfChartMode: 'now', // 双通道图：now=现测 / aligned=移位 / both=两者
   dbpfGroup: '',       // 双通道：当前分组（DUO / SHAO）
   dbpfA: '', dbpfB: '',
   yieldData: null,     // {header:[], rows:[{}], dateMin, dateMax}
@@ -1852,6 +1861,28 @@ function bindSpectraEvents() {
   if (dbpfEx) dbpfEx.addEventListener('change', e => {
     state.dbpfExclude = !!e.target.checked;
     renderDbpfPanel();
+  });
+  const dbpfChartMode = $('#dbpf-chart-mode');
+  if (dbpfChartMode) dbpfChartMode.addEventListener('change', e => {
+    state.dbpfChartMode = ['now', 'aligned', 'both'].includes(e.target.value) ? e.target.value : 'now';
+    renderDbpfPanel();
+  });
+  const dbpfChartExp = $('#dbpf-chart-export');
+  if (dbpfChartExp) dbpfChartExp.addEventListener('click', () => {
+    const c = state.charts['dbpf-chart'];
+    if (!c) { toast('还没有图可导出', 'warn'); return; }
+    try {
+      const url = c.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = safeFileName('双通道Ripple_' + (state.dbpfChartMode || 'now') + '_' + new Date().toISOString().slice(0, 10) + '.png');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('已导出图片', 'success');
+    } catch (err) {
+      toast('导出图片失败：' + (err.message || err), 'error');
+    }
   });
   ['dbpf-stage-a', 'dbpf-stage-b'].forEach(id => {
     const el = document.getElementById(id);
@@ -6218,19 +6249,45 @@ function renderDbpfPanel() {
   const cats = rows.map(r => r.cavity);
   const series = [];
   const colors = ['#0969da', '#cf222e', '#1f883d'];
+  const modeSel = $('#dbpf-chart-mode');
+  const cmode = ['now', 'aligned', 'both'].includes(state.dbpfChartMode) ? state.dbpfChartMode : 'now';
+  if (modeSel && modeSel.value !== cmode) modeSel.value = cmode;
+  const valAligned = (r, st, bi) => {
+    if (isOut(r, st, bi)) return null;
+    const p = r.per[st.id];
+    const mm = p ? (bi === 0 ? p.m1 : p.m2) : null;
+    return (mm && mm.rippleAligned !== null && mm.rippleAligned !== undefined) ? mm.rippleAligned : null;
+  };
   stagesUse.forEach((st, si) => {
+    const color = colors[si % colors.length];
     for (let bi = 0; bi < 2; bi++) {
-      series.push({
-        name: `${dbpfStageName(st, si)} · ${band[bi].name}`,
-        type: 'line', smooth: false, showSymbol: cats.length <= 60, symbolSize: 4,
-        connectNulls: false,
-        lineStyle: { width: 1.6, type: bi === 0 ? 'solid' : 'dashed', color: colors[si % colors.length] },
-        itemStyle: { color: colors[si % colors.length] },
-        data: rows.map(r => {
-          const v = valOk(r, st, bi);
-          return v === null ? null : round(v, 3);
-        })
-      });
+      const chTag = `通${bi + 1}`;
+      if (cmode === 'now' || cmode === 'both') {
+        series.push({
+          name: `${st.name} · ${chTag}${cmode === 'both' ? ' 现测' : ''}`,
+          type: 'line', smooth: false, showSymbol: cats.length <= 60, symbolSize: 4,
+          connectNulls: false,
+          lineStyle: { width: 1.6, type: bi === 0 ? 'solid' : 'dashed', color },
+          itemStyle: { color },
+          data: rows.map(r => {
+            const v = valOk(r, st, bi);
+            return v === null ? null : round(v, 3);
+          })
+        });
+      }
+      if (cmode === 'aligned' || cmode === 'both') {
+        series.push({
+          name: `${st.name} · ${chTag}${cmode === 'both' ? ' 移位' : ''}`,
+          type: 'line', smooth: false, showSymbol: false,
+          connectNulls: false,
+          lineStyle: { width: 1.2, type: bi === 0 ? 'dotted' : 'dashed', color, opacity: 0.85 },
+          itemStyle: { color },
+          data: rows.map(r => {
+            const v = valAligned(r, st, bi);
+            return v === null ? null : round(v, 3);
+          })
+        });
+      }
     }
   });
   const limit = Math.min(
