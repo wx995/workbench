@@ -503,10 +503,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <h3>双通道规格（DBPF）· 重点看 Ripple</h3>
       <span class="label label-neutral" id="dbpf-spec-label">—</span>
       <div class="box-actions">
-        <label class="chk-inline" title="一次只看一个批次文件夹：DUO 或 SHAO">分组
-          <select id="dbpf-group" class="sel-sm"></select>
-        </label>
-        <label class="chk-inline" title="选择要对比的两个分区（例如同一批次文件夹里的 S1 与 S2）">对比
+        <label class="chk-inline" title="选择要对比的两个分区（例如同一个 DUO 文件夹里的 S1 与 S2）">对比
           <select id="dbpf-stage-a" class="sel-sm"></select>
           <span>⇄</span>
           <select id="dbpf-stage-b" class="sel-sm"></select>
@@ -1813,12 +1810,6 @@ function bindSpectraEvents() {
   const dbpfLevel = $('#dbpf-level');
   if (dbpfLevel) dbpfLevel.addEventListener('change', e => {
     state.dbpfLevel = Number(e.target.value) > 0 ? Number(e.target.value) : 0.5;
-    renderDbpfPanel();
-  });
-  const dbpfGroupSel = $('#dbpf-group');
-  if (dbpfGroupSel) dbpfGroupSel.addEventListener('change', e => {
-    state.dbpfGroup = e.target.value || '';
-    state.dbpfA = ''; state.dbpfB = '';
     renderDbpfPanel();
   });
   const dbpfEx = $('#dbpf-exclude');
@@ -5948,42 +5939,27 @@ function renderDbpfPanel() {
   }
 
   const stagesUse = (() => {
-    /* 一次只看一个分组（DUO 或 SHAO），组内默认 S1 ⇄ S2 */
+    /* 只看 DUO：组内默认 S1 ⇄ S2，SHAO 不参与 */
     const dirOf = st => {
       const f = (st.files || [])[0];
       const p = f && f.webkitRelativePath ? String(f.webkitRelativePath) : '';
       const parts = p.split('/');
       return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
     };
-    const groupOf = st => {
-      const s = (dirOf(st) + ' ' + st.name).toUpperCase();
-      if (/SHAO|烧/.test(s)) return 'SHAO';
-      if (/DUO/.test(s)) return 'DUO';
-      return '其他';
-    };
-    const groups = Array.from(new Set(sts.map(groupOf)));
-    const gsel = $('#dbpf-group');
-    if (gsel) {
-      const html = groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
-      if (gsel.innerHTML !== html) gsel.innerHTML = html;
-      let g = state.dbpfGroup && groups.includes(state.dbpfGroup) ? state.dbpfGroup : (groups.includes('DUO') ? 'DUO' : groups[0]);
-      gsel.value = g;
-      state.dbpfGroup = g;
-    }
-    const group = state.dbpfGroup || groups[0];
-    const stsG = sts.filter(s => groupOf(s) === group);
-    const byId = id => stsG.find(s => s.id === id);
+    const duo = sts.filter(s => /DUO/i.test(dirOf(s) + ' ' + s.name));
+    const pool = duo.length ? duo : sts;
+    const byId = id => pool.find(s => s.id === id);
     let A = byId(state.dbpfA), B = byId(state.dbpfB);
     if (!A || !B || A === B) {
-      const pick = re => stsG.find(s => re.test(dirOf(s) + ' ' + s.name));
+      const pick = re => pool.find(s => re.test(dirOf(s) + ' ' + s.name));
       const s1 = pick(/(?:^|[-_/\s])S1(?:$|[-_/\s])/i);
       const s2 = pick(/(?:^|[-_/\s])S2(?:$|[-_/\s])/i);
       if (s1 && s2) { A = s1; B = s2; }
-      else { A = stsG[0] || sts[0]; B = stsG[1] || stsG[0] || A; }
+      else { A = pool[0]; B = pool[1] || pool[0]; }
     }
     state.dbpfA = A.id; state.dbpfB = B.id;
     const sa = $('#dbpf-stage-a'), sb = $('#dbpf-stage-b');
-    const opts = stsG.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+    const opts = pool.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
     if (sa) { if (sa.innerHTML !== opts) sa.innerHTML = opts; sa.value = A.id; }
     if (sb) { if (sb.innerHTML !== opts) sb.innerHTML = opts; sb.value = B.id; }
     return A === B ? [A] : [A, B];
@@ -6132,41 +6108,42 @@ function renderDbpfPanel() {
     series
   });
 
-  /* 表：每个分区 × 每通道 的 ripple，附 Δ */
+  /* 表：按通道分组 —— 通道1 的 S1/S2/Δ，再通道2 的 S1/S2/Δ */
+  const stA = stagesUse[0], stB = stagesUse[1] || stagesUse[0];
+  const two = stagesUse.length > 1;
+  const cellHtml = (r, st, bi) => {
+    const p = r.per[st.id];
+    const mm = p ? (bi === 0 ? p.m1 : p.m2) : null;
+    if (!p || !mm || mm.ripple === null) return `<td class="num">—</td>`;
+    if (isOut(r, st, bi)) return `<td class="num"><span style="color:#8c959f;text-decoration:line-through" title="明显异常，已剔除">${round(mm.ripple, 3)}</span></td>`;
+    const over = band[bi].ripple !== null && mm.ripple > band[bi].ripple + 1e-9;
+    return `<td class="num"><span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span></td>`;
+  };
   const head = `<tr><th>腔位</th>` +
-    stagesUse.map((st, si) => `<th class="num">${esc(dbpfStageName(st, si))} 通道1</th><th class="num">${esc(dbpfStageName(st, si))} 通道2</th>`).join('') +
-    (stagesUse.length > 1 ? `<th class="num">Δ 通道1</th><th class="num">Δ 通道2</th>` : '') +
-    `<th>判定（${esc(dbpfStageName(stagesUse[stagesUse.length - 1], stagesUse.length - 1))}）</th></tr>`;
+    [0, 1].map(bi =>
+      `<th class="num">通道${bi + 1}<br>${esc(stA.name)}</th>` +
+      (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ<br>通道${bi + 1}</th>` : '')
+    ).join('') +
+    `<th>判定（${esc(stB.name)}）</th></tr>`;
   const body = rows.map(r => {
-    const cells = stagesUse.map((st, si) => {
-      const p = r.per[st.id];
-      const f = (mm, bi) => {
-        if (!p || !mm || mm.ripple === null) return '—';
-        if (isOut(r, st, bi)) return `<span style="color:#8c959f;text-decoration:line-through" title="明显异常，已剔除">${round(mm.ripple, 3)}</span>`;
-        const over = band[bi].ripple !== null && mm.ripple > band[bi].ripple + 1e-9;
-        return `<span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span>`;
-      };
-      return `<td class="num">${f(p && p.m1, 0)}</td><td class="num">${f(p && p.m2, 1)}</td>`;
+    const cells = [0, 1].map(bi => {
+      let html = cellHtml(r, stA, bi);
+      if (two) {
+        html += cellHtml(r, stB, bi);
+        const a = valOk(r, stA, bi), b = valOk(r, stB, bi);
+        const d = (a !== null && b !== null) ? b - a : null;
+        html += `<td class="num" style="color:${d === null ? '#8c959f' : d > 0 ? '#cf222e' : '#1a7f37'}">${d === null ? '—' : (d >= 0 ? '+' : '') + round(d, 3)}</td>`;
+      }
+      return html;
     }).join('');
-    const lastSt = stagesUse[stagesUse.length - 1];
-    const last = r.per[lastSt.id];
-    let dcell = '';
-    if (stagesUse.length > 1) {
-      const a1 = valOk(r, stagesUse[0], 0), b1 = valOk(r, lastSt, 0);
-      const a2 = valOk(r, stagesUse[0], 1), b2 = valOk(r, lastSt, 1);
-      const d1 = (a1 !== null && b1 !== null) ? b1 - a1 : null;
-      const d2 = (a2 !== null && b2 !== null) ? b2 - a2 : null;
-      const sgn = v => v === null ? '—' : (v >= 0 ? '+' : '') + round(v, 3);
-      dcell = `<td class="num" style="color:${d1 === null ? '#8c959f' : d1 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d1)}</td>` +
-        `<td class="num" style="color:${d2 === null ? '#8c959f' : d2 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d2)}</td>`;
-    }
-    const skipped = isOut(r, lastSt, 0) || isOut(r, lastSt, 1);
+    const last = r.per[stB.id];
+    const skipped = isOut(r, stB, 0) || isOut(r, stB, 1);
     const bad = skipped ? [] : (last ? dbpfJudge(last.m1, band[0], last.s1).concat(dbpfJudge(last.m2, band[1], last.s2)) : ['无数据']);
     const ok = bad.length === 0;
     const verdict = skipped
       ? '<span style="color:#8c959f">异常剔除</span>'
       : (ok ? '<span style="color:#1a7f37">OK</span>' : `<span style="color:#cf222e">${esc(bad.join('；'))}</span>`);
-    return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}${dcell}<td>${verdict}</td></tr>`;
+    return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}<td>${verdict}</td></tr>`;
   }).join('');
   if (tableWrap) {
     tableWrap.innerHTML = `<div class="tbl-wrap" style="max-height:420px"><table class="tbl">` +
@@ -6177,7 +6154,7 @@ function renderDbpfPanel() {
     const lastSt = stagesUse[stagesUse.length - 1];
     const n1 = rows.filter(r => { const v = valOk(r, lastSt, 0); return v !== null && band[0].ripple !== null && v > band[0].ripple + 1e-9; }).length;
     const n2 = rows.filter(r => { const v = valOk(r, lastSt, 1); return v !== null && band[1].ripple !== null && v > band[1].ripple + 1e-9; }).length;
-    note.innerHTML = `共 ${rows.length} 个腔位、${stagesUse.length} 个分区（${esc(stagesUse.map(s => s.name).join(' ⇄ '))}）。` +
+    note.innerHTML = `共 ${rows.length} 个腔位，DUO 的 ${esc(stA.name)} ⇄ ${esc(stB.name)}。` +
       `Ripple 口径：以规格窗口内实测峰值为中心，量「峰值 − ${level} dB」宽度、两侧各收 10%，再与规格窗口取交集；` +
       `通道1 超规格 ${n1} 个、通道2 超规格 ${n2} 个（以 ${esc(lastSt.name)} 判定）。` +
       (excludeOn
