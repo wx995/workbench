@@ -5981,11 +5981,12 @@ function dbpfStopMetrics(d, stops) {
   });
 }
 
-function dbpfJudge(m, band, stopsM) {
+function dbpfJudge(m, band, stopsM, rippleOverride) {
   const bad = [];
   if (!m) return ['无数据'];
+  const rv = (rippleOverride === undefined || rippleOverride === null) ? m.ripple : rippleOverride;
   if (band.il !== null && m.il > band.il + 1e-9) bad.push(`IL ${round(m.il, 2)} > ${band.il}`);
-  if (band.ripple !== null && m.ripple !== null && m.ripple > band.ripple + 1e-9) bad.push(`Ripple ${round(m.ripple, 2)} > ${band.ripple}`);
+  if (band.ripple !== null && rv !== null && rv > band.ripple + 1e-9) bad.push(`Ripple ${round(rv, 2)} > ${band.ripple}`);
   for (const s of stopsM) {
     if (s.iso === null) continue;
     if (s.iso < s.limit - 1e-9) bad.push(`${s.name} ${round(s.iso, 1)} < ${s.limit}`);
@@ -6142,6 +6143,13 @@ function renderDbpfPanel() {
     const v = valOk(r, stagesUse[si], bi);
     return v !== null && band[bi].ripple !== null && v > band[bi].ripple + 1e-9;
   }).length;
+  const overAlignedOf = (si, bi) => rows.filter(r => {
+    if (isOut(r, stagesUse[si], bi)) return false;
+    const p = r.per[stagesUse[si].id];
+    const mm = p ? (bi === 0 ? p.m1 : p.m2) : null;
+    return mm && mm.rippleAligned !== null && mm.rippleAligned !== undefined
+      && band[bi].ripple !== null && mm.rippleAligned > band[bi].ripple + 1e-9;
+  }).length;
   const card = (label, value, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
   for (let bi = 0; bi < 2; bi++) {
     const m0 = medOf(0, bi);
@@ -6162,6 +6170,7 @@ function renderDbpfPanel() {
       `${band[bi].name} 超规格`,
       String(over),
       `${rows.length} 个腔位中 Ripple > ${band[bi].ripple ?? '—'}` + (mAl !== null ? ` · 移位后中位 ${round(mAl, 3)}` : '')
+      + ` · 移位后超 ${overAlignedOf(m1i, bi)} 个`
     ));
   }
   if (kpi) kpi.innerHTML = cards.slice(0, 3).concat(cards.slice(3)).join('');
@@ -6262,7 +6271,7 @@ function renderDbpfPanel() {
       `<th class="num">通道${bi + 1}<br>${esc(stA.name)}</th>` +
       (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ<br>通道${bi + 1}</th>` : '')
     ).join('') +
-    `<th>判定（${esc(stB.name)}）</th></tr>`;
+    `<th>判定（${esc(stB.name)}）<br>现测 / 移位</th></tr>`;
   const body = rows.map(r => {
     const cells = [0, 1].map(bi => {
       let html = cellHtml(r, stA, bi);
@@ -6276,11 +6285,22 @@ function renderDbpfPanel() {
     }).join('');
     const last = r.per[stB.id];
     const skipped = isOut(r, stB, 0) || isOut(r, stB, 1);
-    const bad = skipped ? [] : (last ? dbpfJudge(last.m1, band[0], last.s1).concat(dbpfJudge(last.m2, band[1], last.s2)) : ['无数据']);
-    const ok = bad.length === 0;
-    const verdict = skipped
-      ? '<span style="color:#8c959f">异常剔除</span>'
-      : (ok ? '<span style="color:#1a7f37">OK</span>' : `<span style="color:#cf222e">${esc(bad.join('；'))}</span>`);
+    const verdict = (() => {
+      if (skipped) return '<span style="color:#8c959f">异常剔除</span>';
+      if (!last) return '<span style="color:#8c959f">无数据</span>';
+      const tag = ok => ok ? '<span style="color:#1a7f37">OK</span>' : '<span style="color:#cf222e">NG</span>';
+      const parts = [0, 1].map(bi => {
+        const mm = bi === 0 ? last.m1 : last.m2;
+        if (!mm) return `通${bi + 1} —`;
+        const stopsM = bi === 0 ? last.s1 : last.s2;
+        const badNow = dbpfJudge(mm, band[bi], stopsM);
+        const badAl = dbpfJudge(mm, band[bi], stopsM, mm.rippleAligned);
+        const tip = [badNow.length ? '现测：' + badNow.join('；') : '现测：达标',
+          badAl.length ? '移位：' + badAl.join('；') : '移位：达标'].join(' / ');
+        return `<span title="${esc(tip)}">通${bi + 1} 现测${tag(!badNow.length)} 移位${tag(!badAl.length)}</span>`;
+      });
+      return parts.join('<br>');
+    })();
     return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}<td>${verdict}</td></tr>`;
   }).join('');
   if (tableWrap) {
