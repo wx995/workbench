@@ -271,6 +271,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .quick-range{display:inline-flex;gap:4px;align-items:center;margin-left:2px}
 .quick-range .btn{padding:1px 7px;font-size:11px;border-radius:10px}
 .quick-range .btn:hover{background:var(--bg-hover);border-color:var(--border)}
+.dbpf-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin:4px 0 8px}
+.dbpf-chart-box{border:1px solid var(--border-muted);border-radius:8px;background:var(--bg);padding:6px 8px 2px}
+.dbpf-chart-head{display:flex;gap:10px;align-items:baseline;padding:2px 2px 4px;font-size:11px;color:var(--fg-subtle)}
+.dbpf-chart-head b{font-size:13px;color:var(--fg)}
 .chart-note{font-size:12px;color:var(--fg-muted);padding:0 14px 10px;line-height:1.55}
 .chart-note b{color:var(--fg)}
 .insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px;padding:0 14px 12px}
@@ -554,7 +558,16 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
         </div>
       </div>
       <div class="box-note" id="dbpf-note-top">Ripple 口径：每通道以规格窗口内的实测峰值为中心、取规格通带宽度，只统计高于「峰值 − 取段电平」的连续段（电平见右上角）。电平越小越只看平坦顶，波长偏短时不会被两侧陡降带出假性大 ripple。</div>      <div class="kpi-strip" id="dbpf-kpi"></div>
-      <div class="chart-wrap"><div id="dbpf-chart" style="height:360px"></div></div>
+      <div class="dbpf-charts">
+        <div class="dbpf-chart-box">
+          <div class="dbpf-chart-head"><b>通道1</b><span id="dbpf-head-1">—</span></div>
+          <div id="dbpf-chart1" style="height:320px"></div>
+        </div>
+        <div class="dbpf-chart-box">
+          <div class="dbpf-chart-head"><b>通道2</b><span id="dbpf-head-2">—</span></div>
+          <div id="dbpf-chart2" style="height:320px"></div>
+        </div>
+      </div>
       <div class="chart-note" id="dbpf-note"></div>
       <div id="dbpf-table"></div>
     </div>
@@ -1869,17 +1882,25 @@ function bindSpectraEvents() {
   });
   const dbpfChartExp = $('#dbpf-chart-export');
   if (dbpfChartExp) dbpfChartExp.addEventListener('click', () => {
-    const c = state.charts['dbpf-chart'];
-    if (!c) { toast('还没有图可导出', 'warn'); return; }
+    const list = [
+      { id: 'dbpf-chart1', name: '通1' },
+      { id: 'dbpf-chart2', name: '通2' }
+    ].map(x => ({ c: state.charts[x.id], name: x.name })).filter(x => x.c);
+    if (!list.length) { toast('还没有图可导出', 'warn'); return; }
     try {
-      const url = c.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = safeFileName('双通道Ripple_' + (state.dbpfChartMode || 'now') + '_' + new Date().toISOString().slice(0, 10) + '.png');
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      toast('已导出图片', 'success');
+      const day = new Date().toISOString().slice(0, 10);
+      list.forEach((x, i) => {
+        const url = x.c.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+        setTimeout(() => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = safeFileName(`双通道Ripple_${x.name}_${state.dbpfChartMode || 'now'}_${day}.png`);
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }, i * 250);
+      });
+      toast('已导出 ' + list.length + ' 张图', 'success');
     } catch (err) {
       toast('导出图片失败：' + (err.message || err), 'error');
     }
@@ -6127,13 +6148,17 @@ function renderDbpfPanel() {
   const kpi = $('#dbpf-kpi');
   const note = $('#dbpf-note');
   const tableWrap = $('#dbpf-table');
-  const chartEl = $('#dbpf-chart');
+  const chartEls = [document.getElementById('dbpf-chart1'), document.getElementById('dbpf-chart2')];
+  const showDbpfEmpty = msg => {
+    showEmpty('dbpf-chart1', msg);
+    showEmpty('dbpf-chart2', msg);
+  };
 
   if (!sts.length) {
     if (kpi) kpi.innerHTML = '';
     if (note) note.innerHTML = '还没有已解析的分区：先在「分区管理」里选择 DUO / SHAO 这类文件夹。';
     if (tableWrap) tableWrap.innerHTML = '';
-    showEmpty('dbpf-chart', '先导入分区数据。');
+    showDbpfEmpty('先导入分区数据。');
     return;
   }
 
@@ -6247,7 +6272,7 @@ function renderDbpfPanel() {
 
   /* 图：x=腔位，y=Ripple，每个分区两条线（通道1 实线 / 通道2 虚线） */
   const cats = rows.map(r => r.cavity);
-  const series = [];
+  const seriesByCh = [[], []];
   const colors = ['#0969da', '#cf222e', '#1f883d'];
   const modeSel = $('#dbpf-chart-mode');
   const cmode = ['now', 'aligned', 'both'].includes(state.dbpfChartMode) ? state.dbpfChartMode : 'now';
@@ -6263,12 +6288,13 @@ function renderDbpfPanel() {
     for (let bi = 0; bi < 2; bi++) {
       const chTag = `通${bi + 1}`;
       if (cmode === 'now' || cmode === 'both') {
-        series.push({
-          name: `${st.name} · ${chTag}${cmode === 'both' ? ' 现测' : ''}`,
-          type: 'line', smooth: false, showSymbol: cats.length <= 60, symbolSize: 4,
+        seriesByCh[bi].push({
+          name: `${st.name}${cmode === 'both' ? ' 现测' : ''}`,
+          type: 'line', smooth: false, showSymbol: rows.length <= 40, symbolSize: 4,
           connectNulls: false,
-          lineStyle: { width: 1.6, type: bi === 0 ? 'solid' : 'dashed', color },
+          lineStyle: { width: 1.9, type: 'solid', color },
           itemStyle: { color },
+          emphasis: { focus: 'series' },
           data: rows.map(r => {
             const v = valOk(r, st, bi);
             return v === null ? null : round(v, 3);
@@ -6276,11 +6302,11 @@ function renderDbpfPanel() {
         });
       }
       if (cmode === 'aligned' || cmode === 'both') {
-        series.push({
-          name: `${st.name} · ${chTag}${cmode === 'both' ? ' 移位' : ''}`,
+        seriesByCh[bi].push({
+          name: `${st.name}${cmode === 'both' ? ' 移位' : ''}`,
           type: 'line', smooth: false, showSymbol: false,
           connectNulls: false,
-          lineStyle: { width: 1.2, type: bi === 0 ? 'dotted' : 'dashed', color, opacity: 0.85 },
+          lineStyle: { width: 1.2, type: 'dotted', color, opacity: 0.75 },
           itemStyle: { color },
           data: rows.map(r => {
             const v = valAligned(r, st, bi);
@@ -6290,62 +6316,64 @@ function renderDbpfPanel() {
       }
     }
   });
-  const limit = Math.min(
-    ...[band[0].ripple, band[1].ripple].filter(v => v !== null && isFinite(v))
-  );
-  if (isFinite(limit) && series.length) {
-    series[0] = {
-      ...series[0],
-      markLine: {
-        silent: true, symbol: 'none',
-        data: [{
-          yAxis: limit,
-          label: { formatter: `Ripple 限值 ${limit}`, position: 'insideEndTop', color: '#bf3989' },
-          lineStyle: { color: '#bf3989', type: 'dotted', width: 1.4 }
-        }]
-      }
-    };
-  }
-  makeChart(chartEl, {
-    animation: false,
-    tooltip: {
-      trigger: 'axis', confine: true,
-      formatter: ps => {
-        const i = ps[0].dataIndex;
-        const r = rows[i];
-        if (!r) return '';
-        let h = `<b>${esc(r.cavity)}</b>`;
-        stagesUse.forEach((st, si) => {
-          const p = r.per[st.id];
-          if (!p) return;
-          const bits = [];
-          for (let bi = 0; bi < 2; bi++) {
-            const mm = bi === 0 ? p.m1 : p.m2;
-            if (mm) bits.push(`${band[bi].name} ${mm.ripple === null ? '—' : round(mm.ripple, 3)} dB（CW ${mm.cw}）`);
+  const limitOf = bi => (band[bi].ripple !== null && isFinite(band[bi].ripple)) ? band[bi].ripple : null;
+
+  [0, 1].forEach(bi => {
+    const el = chartEls[bi];
+    if (!el) return;
+    const head = document.getElementById('dbpf-head-' + (bi + 1));
+    if (head) head.textContent = `${band[bi].start}–${band[bi].end} nm · IL ≤ ${band[bi].il ?? '—'} · Ripple ≤ ${band[bi].ripple ?? '—'}`;
+    const s = seriesByCh[bi].slice();
+    const lim = limitOf(bi);
+    if (lim !== null && s.length) {
+      s[0] = {
+        ...s[0],
+        markLine: {
+          silent: true, symbol: 'none',
+          data: [{
+            yAxis: lim,
+            label: { formatter: `限值 ${lim}`, position: 'insideEndTop', color: '#bf3989', fontSize: 10 },
+            lineStyle: { color: '#bf3989', type: 'dashed', width: 1.2 }
+          }]
+        }
+      };
+    }
+    makeChart(el, {
+      animation: false,
+      color: colors,
+      tooltip: {
+        trigger: 'axis', confine: true,
+        backgroundColor: 'rgba(255,255,255,0.97)', borderColor: '#d0d7de', borderWidth: 1,
+        textStyle: { color: '#1f2328', fontSize: 11 }, padding: [6, 8],
+        formatter: ps => {
+          const i = ps[0].dataIndex;
+          const r = rows[i];
+          if (!r) return '';
+          let h = `<b>${esc(r.cavity)}</b>` + (lim !== null ? `　<span style="color:#8c959f;font-size:10px">限值 ${lim} dB</span>` : '');
+          for (const p of ps) {
+            if (p.value === null || p.value === undefined) continue;
+            const col = p.color || '#57606a';
+            h += `<br><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:5px"></span>${esc(p.seriesName)}：<b>${p.value}</b> dB`;
           }
-          h += `<br>${esc(dbpfStageName(st, si))}：${bits.join('，')}`;
-        });
-        return h;
-      }
-    },
-    legend: { top: 0, type: 'scroll', textStyle: { fontSize: 11 } },
-    grid: { left: 55, right: 20, top: 46, bottom: 76 },
-    xAxis: {
-      type: 'category', data: cats,
-      axisLabel: { rotate: 60, hideOverlap: true, fontSize: 10, color: '#57606a' },
-      axisLine: { lineStyle: { color: '#d0d7de' } }
-    },
-    yAxis: {
-      type: 'value', name: 'Ripple / dB', nameGap: 12,
-      nameTextStyle: { color: '#57606a' },
-      axisLabel: { color: '#57606a' },
-      splitLine: { lineStyle: { color: '#d8dee4', type: 'dashed' } }
-    },
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0 },
-      { type: 'slider', xAxisIndex: 0, bottom: 8, height: 16, borderColor: '#d0d7de', fillerColor: 'rgba(9,105,218,0.12)' }
-    ],
-    series
+          return h;
+        }
+      },
+      legend: { top: 0, type: 'scroll', itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 11, color: '#57606a' } },
+      grid: { left: 52, right: 18, top: 44, bottom: 52 },
+      xAxis: {
+        type: 'category', data: cats, boundaryGap: false,
+        axisLabel: { rotate: 45, fontSize: 10, color: '#57606a', hideOverlap: true },
+        axisLine: { lineStyle: { color: '#d0d7de' } }, axisTick: { show: false }
+      },
+      yAxis: {
+        type: 'value', name: 'Ripple / dB', nameGap: 12, min: 0,
+        nameTextStyle: { color: '#57606a', fontSize: 11 },
+        axisLabel: { color: '#57606a', fontSize: 10 },
+        splitLine: { lineStyle: { color: '#eaeef2', type: 'dashed' } }
+      },
+      dataZoom: [{ type: 'inside' }],
+      series: s
+    });
   });
 
   /* 表：按通道分组 —— 通道1 的 S1/S2/Δ，再通道2 的 S1/S2/Δ */
@@ -6441,7 +6469,7 @@ function renderDbpfPanel() {
         ? `<br>已按 3.5×MAD 剔除明显异常：通道1 ${outCount[0]} 处、通道2 ${outCount[1]} 处` +
           (outCav.size ? `（${esc([...outCav].slice(0, 10).join('、'))}${outCav.size > 10 ? ' 等' : ''}）` : '') + '；这些格子划掉、不参与统计。'
         : '<br>未剔除异常点（勾选右上「排除异常」可按 3.5×MAD 剔除）。') +
-      `<br>图上同一颜色是同一分区，实线=通道1、虚线=通道2；粉色点线是 Ripple 限值（取两通道中更严的）。`;
+      `<br>上面两张图分别是通道1 / 通道2；同一颜色是同一分区，实线=现测、点线=移位（选择「两者」时同时出现），粉色虚线是该通道的 Ripple 限值。`;
   }
 }
 
