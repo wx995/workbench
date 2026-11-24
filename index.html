@@ -5948,7 +5948,24 @@ function dbpfBandMetrics(d, band, level, trim) {
     if (x >= lo && x <= hi) { cnt++; if (val[i] < mn) mn = val[i]; if (val[i] > mx) mx = val[i]; }
   }
   const ripple = (cnt >= 3 && isFinite(mn)) ? (mx - mn) : null;
-  return { cw: peakX, il: -peakY, ripple, winLo: lo, winHi: hi, bandW: halfW * 2, pts: cnt };
+
+  /* 把曲线平移到规格中心（按「实测通带中点」对齐，而不是峰值，峰值常偏在一侧）后，
+     在规格窗口内再算一次：波长偏短/偏长造成的假性 ripple 就被消掉 */
+  const center = (band.start + band.end) / 2;
+  const midX = (wl[l] + wl[r]) / 2;
+  const dl = center - midX;
+  let mn2 = Infinity, mx2 = -Infinity, cnt2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = wl[i] + dl;
+    if (x >= band.start - 1e-9 && x <= band.end + 1e-9 && val[i] >= thr) {
+      cnt2++;
+      if (val[i] < mn2) mn2 = val[i];
+      if (val[i] > mx2) mx2 = val[i];
+    }
+  }
+  const rippleAligned = (cnt2 >= 3 && isFinite(mn2)) ? (mx2 - mn2) : null;
+
+  return { cw: peakX, il: -peakY, ripple, rippleAligned, shift: dl, winLo: lo, winHi: hi, bandW: halfW * 2, pts: cnt };
 }
 
 /* 三个截止带：取带内最大电平 dB → 隔离度 = −max */
@@ -6115,6 +6132,12 @@ function renderDbpfPanel() {
   /* KPI：两个通道的 ripple 中位数（A → B）+ 超限数 */
   const cards = [];
   const medOf = (si, bi) => dbpfMedian(rows.map(r => valOk(r, stagesUse[si], bi)));
+  const medAlignedOf = (si, bi) => dbpfMedian(rows.map(r => {
+    if (isOut(r, stagesUse[si], bi)) return null;
+    const p = r.per[stagesUse[si].id];
+    const mm = p ? (bi === 0 ? p.m1 : p.m2) : null;
+    return (mm && mm.rippleAligned !== undefined) ? mm.rippleAligned : null;
+  }));
   const overOf = (si, bi) => rows.filter(r => {
     const v = valOk(r, stagesUse[si], bi);
     return v !== null && band[bi].ripple !== null && v > band[bi].ripple + 1e-9;
@@ -6126,6 +6149,7 @@ function renderDbpfPanel() {
     const m1i = stagesUse.length - 1;
     const over = overOf(m1i, bi);
     const dlt = (m0 !== null && m1 !== null) ? (m1 - m0) : null;
+    const mAl = medAlignedOf(m1i, bi);
     cards.push(card(
       `${band[bi].name} Ripple 中位`,
       m1 !== null ? round(m1, 3) + ' dB' : (m0 !== null ? round(m0, 3) + ' dB' : '—'),
@@ -6137,7 +6161,7 @@ function renderDbpfPanel() {
     cards.push(card(
       `${band[bi].name} 超规格`,
       String(over),
-      `${rows.length} 个腔位中 Ripple > ${band[bi].ripple ?? '—'}`
+      `${rows.length} 个腔位中 Ripple > ${band[bi].ripple ?? '—'}` + (mAl !== null ? ` · 移位后中位 ${round(mAl, 3)}` : '')
     ));
   }
   if (kpi) kpi.innerHTML = cards.slice(0, 3).concat(cards.slice(3)).join('');
@@ -6226,9 +6250,12 @@ function renderDbpfPanel() {
     const p = r.per[st.id];
     const mm = p ? (bi === 0 ? p.m1 : p.m2) : null;
     if (!p || !mm || mm.ripple === null) return `<td class="num">—</td>`;
-    if (isOut(r, st, bi)) return `<td class="num"><span style="color:#8c959f;text-decoration:line-through" title="明显异常，已剔除">${round(mm.ripple, 3)}</span></td>`;
+    const alTxt = (mm.rippleAligned === null || mm.rippleAligned === undefined)
+      ? ''
+      : `<span style="display:block;font-size:10px;font-weight:400;color:#6e7781" title="把曲线平移到规格中心后，在规格窗口内算的 ripple">移位 ${round(mm.rippleAligned, 3)}</span>`;
+    if (isOut(r, st, bi)) return `<td class="num"><span style="color:#8c959f;text-decoration:line-through" title="明显异常，已剔除">${round(mm.ripple, 3)}</span>${alTxt}</td>`;
     const over = band[bi].ripple !== null && mm.ripple > band[bi].ripple + 1e-9;
-    return `<td class="num"><span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span></td>`;
+    return `<td class="num"><span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span>${alTxt}</td>`;
   };
   const head = `<tr><th>腔位</th>` +
     [0, 1].map(bi =>
@@ -6266,7 +6293,7 @@ function renderDbpfPanel() {
     const n1 = rows.filter(r => { const v = valOk(r, lastSt, 0); return v !== null && band[0].ripple !== null && v > band[0].ripple + 1e-9; }).length;
     const n2 = rows.filter(r => { const v = valOk(r, lastSt, 1); return v !== null && band[1].ripple !== null && v > band[1].ripple + 1e-9; }).length;
     note.innerHTML = `共 ${rows.length} 个腔位，DUO 的 ${esc(stA.name)} ⇄ ${esc(stB.name)}。` +
-      `Ripple 口径：以规格窗口内实测峰值为中心，量「峰值 − ${level} dB」宽度、两侧各收 10%，再与规格窗口取交集；` +
+      `Ripple 口径：主数为「现测」——以规格窗口内实测峰值为中心，量「峰值 − ${level} dB」宽度、两侧各收 10%，再与规格窗口取交集；格子下方小字为「移位后」——把整条曲线平移到规格中心后再在规格窗口内算，用来排掉波长偏移带来的假性偏大。` +
       `通道1 超规格 ${n1} 个、通道2 超规格 ${n2} 个（以 ${esc(lastSt.name)} 判定）。` +
       (excludeOn
         ? `<br>已按 3.5×MAD 剔除明显异常：通道1 ${outCount[0]} 处、通道2 ${outCount[1]} 处` +
