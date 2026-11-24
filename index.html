@@ -448,7 +448,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
     <div class="app-logo">烤</div>
     <div>
       <div class="app-title">光谱与良率分析工作台</div>
-      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.12.6</div>
+      <div class="app-sub">滤光片烘烤/清洗光谱对比 · 一体机良率分析 · 异常工单 · v1.13.0</div>
     </div>
     <div class="header-badges" id="header-badges">
       <span class="pill" id="pill-spectra"><span class="dot"></span>光谱：未加载</span>
@@ -495,6 +495,31 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
     <div class="box-body">
       <div id="stage-list"></div>
       <div class="box-note">每个分区选择一个数据文件夹（如烘烤前 / 烘烤后 / 清洗后）。程序按文件名末尾的腔位自动配对（如 <code>…-A1.xls</code>、<code>…-B10-Par.xls</code>、<code>1-1.xls</code>），支持 .xls/.xlsx/.csv/.txt/.tsv，<code>-Par</code> 结尾的文件按参数表读取；汇总表、晶圆图等非光谱文件会自动跳过。</div>
+    </div>
+  </div>
+
+  <div class="box" id="dbpf-box" style="display:none">
+    <div class="box-header">
+      <h3>双通道规格（DBPF）· 重点看 Ripple</h3>
+      <span class="label label-neutral" id="dbpf-spec-label">—</span>
+      <div class="box-actions">
+        <label class="chk-inline" title="Ripple 取段电平：只统计曲线高于「峰值 − 该值」的连续段。电平越小越只看平坦顶，越不容易被两侧陡降带偏">取段电平
+          <select id="dbpf-level" class="sel-sm">
+            <option value="0.5" selected>0.5 dB</option>
+            <option value="1">1 dB</option>
+            <option value="2">2 dB</option>
+            <option value="3">3 dB</option>
+          </select>
+        </label>
+        <button class="btn btn-sm" id="dbpf-export" title="导出每通道的 CW / 插损 / Ripple / 截止带判定">导出双通道明细</button>
+      </div>
+    </div>
+    <div class="box-body">
+      <div class="box-note" id="dbpf-note-top">Ripple 口径：每通道以规格窗口内的实测峰值为中心、取规格通带宽度，只统计高于「峰值 − 取段电平」的连续段（电平见右上角）。电平越小越只看平坦顶，波长偏短时不会被两侧陡降带出假性大 ripple。</div>
+      <div class="kpi-strip" id="dbpf-kpi"></div>
+      <div class="chart-wrap"><div id="dbpf-chart" style="height:360px"></div></div>
+      <div class="chart-note" id="dbpf-note"></div>
+      <div id="dbpf-table"></div>
     </div>
   </div>
 
@@ -1382,6 +1407,7 @@ const state = {
   specLib: null,       // {items:[{type, top, pn, name, file, spec}]}
   specSelected: null,  // {pn, file, name, spec, override}
   specOverride: null,  // 当前规格的用户编辑 {field:value}
+  dbpfLevel: 0.5,      // 双通道 Ripple 取段电平（峰值 − N dB）
   yieldData: null,     // {header:[], rows:[{}], dateMin, dateMax}
   filters: { start:'', end:'', 一体机:[], 工单:[], 炉号:[], 烘烤次数:[], PN:[] },
   trendGran: 'week',
@@ -1578,7 +1604,7 @@ function initTabnavToggle() {
 }
 
 /* ---------- 版本标识 ---------- */
-const VERSION = 'v1.12.6';
+const VERSION = 'v1.13.0';
 
 /* 炉号就是一个独立编号，不能再按首字母合并：
    常见值是 Y1#…Y8#、Z1#…Z12#、N#、X#、R#、Q#（也兼容旧数据的 D24201 这类批次号）。
@@ -1768,6 +1794,13 @@ function bindSpectraEvents() {
   $('#focus-select').addEventListener('change', onFocusChange);
   $('#focus-custom').addEventListener('input', onFocusChange);
   $('#btn-export-compare').addEventListener('click', exportCompareTable);
+  const dbpfBtn = $('#dbpf-export');
+  if (dbpfBtn) dbpfBtn.addEventListener('click', exportDbpf);
+  const dbpfLevel = $('#dbpf-level');
+  if (dbpfLevel) dbpfLevel.addEventListener('change', e => {
+    state.dbpfLevel = Number(e.target.value) > 0 ? Number(e.target.value) : 0.5;
+    renderDbpfPanel();
+  });
   $('#btn-export-ng').addEventListener('click', exportNgList);
 
   /* 状态变化：参数切换 / 明细排序 */
@@ -2868,6 +2901,7 @@ function rebuildCavityList() {
   renderCompareTable();
   renderSpectraChart();
   renderNgOverview();
+  renderDbpfPanel();
 }
 
 function cavitySort(a, b) {
@@ -5719,6 +5753,362 @@ function onSpecTreeClick(e) {
   }
 }
 
+/* ================= 双通道规格（DBPF）：每通道单独算 Ripple ================= */
+/* Ripple 口径（用户确认）：每通道取「规格通带窗口」内的实测峰值，以峰值为中心、
+   取与规格通带等宽的窗口，且只统计曲线高于「峰值 − 3 dB」的连续段 ——
+   这样波长偏短、窗口切到下降沿时不会算出假性大 ripple。 */
+function dbpfParseBand(v) {
+  const a = String(v == null ? '' : v).split(/[,，;\s]+/).map(Number).filter(n => isFinite(n));
+  if (a.length < 2) return null;
+  return {
+    start: a[0], end: a[1],
+    il: isFinite(a[2]) ? a[2] : null,
+    ripple: isFinite(a[3]) ? a[3] : null
+  };
+}
+
+function dbpfChannels(spec) {
+  if (!spec) return null;
+  const b1 = dbpfParseBand(spec.T1);
+  const b2 = dbpfParseBand(spec.T2);
+  if (!b1 || !b2) return null;
+  const stops = [];
+  const addStop = (name, v) => {
+    const a = String(v == null ? '' : v).split(/[,，;\s]+/).map(Number).filter(n => isFinite(n));
+    if (a.length >= 2) stops.push({ name, start: a[0], end: a[1], limit: isFinite(a[2]) ? a[2] : 20 });
+  };
+  addStop('左截止', spec.STOPLeft);
+  addStop('中截止', spec.STOP);
+  addStop('右截止', spec.STOPRight);
+  return {
+    bands: [{ name: '通道1', idx: 0, ...b1 }, { name: '通道2', idx: 1, ...b2 }],
+    stops
+  };
+}
+
+/* 单通道：CW（峰值波长）、IL、Ripple。
+   步骤：① 在规格通带窗口内找实测峰值；② 以峰值为中心，量出「峰值 − level」处的实测宽度；
+   ③ 两侧各向里收 10%（避开刚开始陡降的那一段），并与规格窗口取交集；④ 交集内 max−min = Ripple。*/
+function dbpfBandMetrics(d, band, level, trim) {
+  if (!d || !d.wl || d.wl.length < 10) return null;
+  const wl = d.wl, val = d.val, n = wl.length;
+  const drop = isFinite(level) && level > 0 ? level : 0.5;
+  const tr = isFinite(trim) && trim >= 0 && trim < 0.5 ? trim : 0.1;
+  let i0 = 0;
+  while (i0 < n && wl[i0] < band.start) i0++;
+  let i1 = n - 1;
+  while (i1 >= 0 && wl[i1] > band.end) i1--;
+  if (i1 - i0 < 2) return null;
+  let pi = i0;
+  for (let i = i0; i <= i1; i++) if (val[i] > val[pi]) pi = i;
+  const peakX = wl[pi], peakY = val[pi], thr = peakY - drop;
+  let l = pi;
+  while (l - 1 >= 0 && val[l - 1] >= thr) l--;
+  let r = pi;
+  while (r + 1 < n && val[r + 1] >= thr) r++;
+  const halfW = (wl[r] - wl[l]) / 2;
+  let lo = Math.max(band.start, peakX - halfW * (1 - tr));
+  let hi = Math.min(band.end, peakX + halfW * (1 - tr));
+  if (!(hi > lo)) { lo = Math.max(band.start, peakX - halfW); hi = Math.min(band.end, peakX + halfW); }
+  let mn = Infinity, mx = -Infinity, cnt = 0;
+  for (let i = 0; i < n; i++) {
+    const x = wl[i];
+    if (x >= lo && x <= hi) { cnt++; if (val[i] < mn) mn = val[i]; if (val[i] > mx) mx = val[i]; }
+  }
+  const ripple = (cnt >= 3 && isFinite(mn)) ? (mx - mn) : null;
+  return { cw: peakX, il: -peakY, ripple, winLo: lo, winHi: hi, bandW: halfW * 2, pts: cnt };
+}
+
+/* 三个截止带：取带内最大电平 dB → 隔离度 = −max */
+function dbpfStopMetrics(d, stops) {
+  if (!d || !d.wl || !d.wl.length) return [];
+  return stops.map(s => {
+    let mx = -Infinity;
+    for (let i = 0; i < d.wl.length; i++) {
+      const x = d.wl[i];
+      if (x >= s.start && x <= s.end && d.val[i] > mx) mx = d.val[i];
+    }
+    return { ...s, iso: isFinite(mx) ? -mx : null };
+  });
+}
+
+function dbpfJudge(m, band, stopsM) {
+  const bad = [];
+  if (!m) return ['无数据'];
+  if (band.il !== null && m.il > band.il + 1e-9) bad.push(`IL ${round(m.il, 2)} > ${band.il}`);
+  if (band.ripple !== null && m.ripple !== null && m.ripple > band.ripple + 1e-9) bad.push(`Ripple ${round(m.ripple, 2)} > ${band.ripple}`);
+  for (const s of stopsM) {
+    if (s.iso === null) continue;
+    if (s.iso < s.limit - 1e-9) bad.push(`${s.name} ${round(s.iso, 1)} < ${s.limit}`);
+  }
+  return bad;
+}
+
+function dbpfStageName(st, i) {
+  return String(st.name || ('分区' + (i + 1)));
+}
+
+function dbpfCollect() {
+  const spec = currentSpec();
+  const ch = spec ? dbpfChannels(spec.spec) : null;
+  if (!ch) return null;
+  const level = Number(state.dbpfLevel) > 0 ? Number(state.dbpfLevel) : 0.5;
+  const sts = state.stages.filter(s => s.parsed && s.data && s.data.size);
+  if (!sts.length) return { spec, ch, sts: [], rows: [], level };
+  const cavities = [];
+  const seen = new Set();
+  for (const st of sts) for (const c of st.data.keys()) if (!seen.has(c)) { seen.add(c); cavities.push(c); }
+  cavities.sort(cavitySort);
+  const rows = cavities.map(c => {
+    const per = sts.map(st => {
+      const d = st.data.get(c);
+      if (!d) return null;
+      return {
+        m1: dbpfBandMetrics(d, ch.bands[0], level),
+        m2: dbpfBandMetrics(d, ch.bands[1], level),
+        s1: dbpfStopMetrics(d, ch.stops),
+        s2: dbpfStopMetrics(d, ch.stops)
+      };
+    });
+    return { cavity: c, per };
+  });
+  return { spec, ch, sts, rows, level };
+}
+
+function dbpfMedian(arr) {
+  const a = arr.filter(v => v !== null && isFinite(v)).sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+function renderDbpfPanel() {
+  const box = $('#dbpf-box');
+  if (!box) return;
+  const data = dbpfCollect();
+  if (!data) { box.style.display = 'none'; return; }
+  const { spec, ch, sts, rows, level } = data;
+  box.style.display = '';
+  const levelSel = $('#dbpf-level');
+  if (levelSel && String(levelSel.value) !== String(level)) levelSel.value = String(level);
+  const label = $('#dbpf-spec-label');
+  if (label) {
+    label.textContent = `${spec.name || spec.pn || '规格'} · 通道1 ${ch.bands[0].start}~${ch.bands[0].end} nm（Ripple ≤ ${ch.bands[0].ripple ?? '—'}） · 通道2 ${ch.bands[1].start}~${ch.bands[1].end} nm（Ripple ≤ ${ch.bands[1].ripple ?? '—'}）`;
+    label.className = 'label label-accent';
+  }
+  const kpi = $('#dbpf-kpi');
+  const note = $('#dbpf-note');
+  const tableWrap = $('#dbpf-table');
+  const chartEl = $('#dbpf-chart');
+
+  if (!sts.length) {
+    if (kpi) kpi.innerHTML = '';
+    if (note) note.innerHTML = '还没有已解析的分区：先在「分区管理」里选择 DUO / SHAO 这类文件夹。';
+    if (tableWrap) tableWrap.innerHTML = '';
+    showEmpty('dbpf-chart', '先导入分区数据。');
+    return;
+  }
+
+  const stagesUse = sts.slice(0, 4);
+  const band = ch.bands;
+  const val = (r, si, bi) => {
+    const p = r.per[si];
+    if (!p) return null;
+    return bi === 0 ? (p.m1 && p.m1.ripple) : (p.m2 && p.m2.ripple);
+  };
+
+  /* KPI：两个通道的 ripple 中位数（首/末分区）+ 超限数 */
+  const cards = [];
+  const medOf = (si, bi) => dbpfMedian(rows.map(r => val(r, si, bi)));
+  const overOf = (si, bi) => rows.filter(r => {
+    const v = val(r, si, bi);
+    return v !== null && band[bi].ripple !== null && v > band[bi].ripple + 1e-9;
+  }).length;
+  const card = (label, value, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
+  for (let bi = 0; bi < 2; bi++) {
+    const m0 = medOf(0, bi);
+    const m1 = stagesUse.length > 1 ? medOf(stagesUse.length - 1, bi) : null;
+    const m1i = stagesUse.length - 1;
+    const over = overOf(m1i, bi);
+    const dlt = (m0 !== null && m1 !== null) ? (m1 - m0) : null;
+    cards.push(card(
+      `${band[bi].name} Ripple 中位`,
+      m1 !== null ? round(m1, 3) + ' dB' : (m0 !== null ? round(m0, 3) + ' dB' : '—'),
+      (stagesUse.length > 1 && dlt !== null)
+        ? `${dbpfStageName(stagesUse[0], 0)} ${round(m0, 3)} → ${dbpfStageName(stagesUse[m1i], m1i)} ${round(m1, 3)}（${dlt >= 0 ? '+' : ''}${round(dlt, 3)}）`
+        : `限值 ≤ ${band[bi].ripple ?? '—'} · 中位值`,
+      m1 !== null && band[bi].ripple !== null && m1 <= band[bi].ripple ? 'ok' : 'warn'
+    ));
+    cards.push(card(
+      `${band[bi].name} 超规格`,
+      String(over),
+      `${rows.length} 个腔位中 Ripple > ${band[bi].ripple ?? '—'}`
+    ));
+  }
+  if (kpi) kpi.innerHTML = cards.slice(0, 3).concat(cards.slice(3)).join('');
+
+  /* 图：x=腔位，y=Ripple，每个分区两条线（通道1 实线 / 通道2 虚线） */
+  const cats = rows.map(r => r.cavity);
+  const series = [];
+  const colors = ['#0969da', '#cf222e', '#1f883d'];
+  stagesUse.forEach((st, si) => {
+    for (let bi = 0; bi < 2; bi++) {
+      series.push({
+        name: `${dbpfStageName(st, si)} · ${band[bi].name}`,
+        type: 'line', smooth: false, showSymbol: cats.length <= 60, symbolSize: 4,
+        connectNulls: false,
+        lineStyle: { width: 1.6, type: bi === 0 ? 'solid' : 'dashed', color: colors[si % colors.length] },
+        itemStyle: { color: colors[si % colors.length] },
+        data: rows.map(r => {
+          const v = val(r, si, bi);
+          return v === null ? null : round(v, 3);
+        })
+      });
+    }
+  });
+  const limit = Math.min(
+    ...[band[0].ripple, band[1].ripple].filter(v => v !== null && isFinite(v))
+  );
+  if (isFinite(limit) && series.length) {
+    series[0] = {
+      ...series[0],
+      markLine: {
+        silent: true, symbol: 'none',
+        data: [{
+          yAxis: limit,
+          label: { formatter: `Ripple 限值 ${limit}`, position: 'insideEndTop', color: '#bf3989' },
+          lineStyle: { color: '#bf3989', type: 'dotted', width: 1.4 }
+        }]
+      }
+    };
+  }
+  makeChart(chartEl, {
+    animation: false,
+    tooltip: {
+      trigger: 'axis', confine: true,
+      formatter: ps => {
+        const i = ps[0].dataIndex;
+        const r = rows[i];
+        if (!r) return '';
+        let h = `<b>${esc(r.cavity)}</b>`;
+        stagesUse.forEach((st, si) => {
+          const p = r.per[si];
+          if (!p) return;
+          const bits = [];
+          for (let bi = 0; bi < 2; bi++) {
+            const mm = bi === 0 ? p.m1 : p.m2;
+            if (mm) bits.push(`${band[bi].name} ${mm.ripple === null ? '—' : round(mm.ripple, 3)} dB（CW ${mm.cw}）`);
+          }
+          h += `<br>${esc(dbpfStageName(st, si))}：${bits.join('，')}`;
+        });
+        return h;
+      }
+    },
+    legend: { top: 0, type: 'scroll', textStyle: { fontSize: 11 } },
+    grid: { left: 55, right: 20, top: 46, bottom: 76 },
+    xAxis: {
+      type: 'category', data: cats,
+      axisLabel: { rotate: 60, hideOverlap: true, fontSize: 10, color: '#57606a' },
+      axisLine: { lineStyle: { color: '#d0d7de' } }
+    },
+    yAxis: {
+      type: 'value', name: 'Ripple / dB', nameGap: 12,
+      nameTextStyle: { color: '#57606a' },
+      axisLabel: { color: '#57606a' },
+      splitLine: { lineStyle: { color: '#d8dee4', type: 'dashed' } }
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0 },
+      { type: 'slider', xAxisIndex: 0, bottom: 8, height: 16, borderColor: '#d0d7de', fillerColor: 'rgba(9,105,218,0.12)' }
+    ],
+    series
+  });
+
+  /* 表：每个分区 × 每通道 的 ripple，附 Δ */
+  const head = `<tr><th>腔位</th>` +
+    stagesUse.map((st, si) => `<th class="num">${esc(dbpfStageName(st, si))} 通道1</th><th class="num">${esc(dbpfStageName(st, si))} 通道2</th>`).join('') +
+    (stagesUse.length > 1 ? `<th class="num">Δ 通道1</th><th class="num">Δ 通道2</th>` : '') +
+    `<th>判定（${esc(dbpfStageName(stagesUse[stagesUse.length - 1], stagesUse.length - 1))}）</th></tr>`;
+  const body = rows.map(r => {
+    const cells = stagesUse.map((st, si) => {
+      const p = r.per[si];
+      const f = (mm, bi) => {
+        if (!p || !mm || mm.ripple === null) return '—';
+        const over = band[bi].ripple !== null && mm.ripple > band[bi].ripple + 1e-9;
+        return `<span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span>`;
+      };
+      return `<td class="num">${f(p && p.m1, 0)}</td><td class="num">${f(p && p.m2, 1)}</td>`;
+    }).join('');
+    const last = r.per[r.per.length - 1];
+    let dcell = '';
+    if (stagesUse.length > 1) {
+      const a1 = r.per[0] && r.per[0].m1, b1 = last && last.m1;
+      const a2 = r.per[0] && r.per[0].m2, b2 = last && last.m2;
+      const d1 = (a1 && b1 && a1.ripple !== null && b1.ripple !== null) ? b1.ripple - a1.ripple : null;
+      const d2 = (a2 && b2 && a2.ripple !== null && b2.ripple !== null) ? b2.ripple - a2.ripple : null;
+      const sgn = v => v === null ? '—' : (v >= 0 ? '+' : '') + round(v, 3);
+      dcell = `<td class="num" style="color:${d1 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d1)}</td><td class="num" style="color:${d2 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d2)}</td>`;
+    }
+    const bad = last ? dbpfJudge(last.m1, band[0], last.s1).concat(dbpfJudge(last.m2, band[1], last.s2)) : ['无数据'];
+    const ok = bad.length === 0;
+    return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}${dcell}<td>${ok ? '<span style="color:#1a7f37">OK</span>' : `<span style="color:#cf222e">${esc(bad.join('；'))}</span>`}</td></tr>`;
+  }).join('');
+  if (tableWrap) {
+    tableWrap.innerHTML = `<div class="tbl-wrap" style="max-height:420px"><table class="tbl">` +
+      `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  if (note) {
+    const n1 = rows.filter(r => { const p = r.per[r.per.length - 1]; return p && p.m1 && band[0].ripple !== null && p.m1.ripple !== null && p.m1.ripple > band[0].ripple; }).length;
+    const n2 = rows.filter(r => { const p = r.per[r.per.length - 1]; return p && p.m2 && band[1].ripple !== null && p.m2.ripple !== null && p.m2.ripple > band[1].ripple; }).length;
+    note.innerHTML = `共 ${rows.length} 个腔位、${stagesUse.length} 个分区。` +
+      `Ripple 口径：峰值 ± 规格通带/2，只取 ≥ 峰值 − ${level} dB 的连续段；` +
+      `通道1 超规格 ${n1} 个、通道2 超规格 ${n2} 个（以最后一个分区判定）。` +
+      `<br>图上同一颜色是同一分区，实线=通道1、虚线=通道2；粉色点线是 Ripple 限值（取两通道中更严的）。`;
+  }
+}
+
+/* 导出双通道明细 */
+function exportDbpf() {
+  const data = dbpfCollect();
+  if (!data) { toast('当前规格不是双通道（缺 T1/T2），无法导出', 'warn'); return; }
+  const { spec, ch, sts, rows, level } = data;
+  if (!rows.length) { toast('还没有分区数据', 'warn'); return; }
+  const head = ['腔位'];
+  sts.forEach(st => {
+    ch.bands.forEach(b => head.push(`${st.name || ''} ${b.name} CW`, `${st.name || ''} ${b.name} IL`, `${st.name || ''} ${b.name} Ripple`));
+    head.push(`${st.name || ''} 截止带最小隔离`);
+  });
+  const body = rows.map(r => {
+    const line = [r.cavity];
+    r.per.forEach(p => {
+      ch.bands.forEach((b, bi) => {
+        const m = bi === 0 ? (p && p.m1) : (p && p.m2);
+        line.push(m ? round(m.cw, 2) : '', m ? round(m.il, 2) : '', m && m.ripple !== null ? round(m.ripple, 3) : '');
+      });
+      const isos = (p ? (p.s1 || []) : []).map(x => x.iso).filter(v => v !== null);
+      line.push(isos.length ? round(Math.min(...isos), 1) : '');
+    });
+    return line;
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([head].concat(body));
+  ws['!cols'] = head.map((h, i) => ({ wch: i === 0 ? 10 : 16 }));
+  XLSX.utils.book_append_sheet(wb, ws, '双通道明细');
+  const desc = XLSX.utils.aoa_to_sheet([
+    ['项目', '值'],
+    ['规格', spec.name || ''],
+    ['通道1', `${ch.bands[0].start} ~ ${ch.bands[0].end} nm，IL ≤ ${ch.bands[0].il}，Ripple ≤ ${ch.bands[0].ripple}`],
+    ['通道2', `${ch.bands[1].start} ~ ${ch.bands[1].end} nm，IL ≤ ${ch.bands[1].il}，Ripple ≤ ${ch.bands[1].ripple}`],
+    ['Ripple 口径', `每通道以规格窗口内实测峰值为中心、取规格通带宽度，只统计高于峰值 − ${level} dB 的连续段`],
+    ['导出时间', new Date().toLocaleString()]
+  ]);
+  desc['!cols'] = [{ wch: 12 }, { wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, desc, '说明');
+  XLSX.writeFile(wb, safeFileName('双通道规格_' + (spec.pn || spec.name || '') + '.xlsx'));
+  toast('已导出双通道明细（' + rows.length + ' 个腔位）', 'success');
+}
+
 /* ---------- 选择规格 ---------- */
 function currentSpec() {
   return state.specSelected ? { ...state.specSelected, spec: state.specOverride ? { ...state.specOverride.spec } : state.specSelected.spec } : null;
@@ -5734,6 +6124,7 @@ function selectSpec(it) {
   renderSpecPanel();
   renderCompareTable();
   renderNgOverview();
+  renderDbpfPanel();
   refreshSpectraChart(true);          // 规格线跟着规格走
   toast('已应用规格：' + it.name, 'success');
   memScheduleSpecSave();
