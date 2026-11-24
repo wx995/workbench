@@ -503,7 +503,18 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
       <h3>双通道规格（DBPF）· 重点看 Ripple</h3>
       <span class="label label-neutral" id="dbpf-spec-label">—</span>
       <div class="box-actions">
-        <label class="chk-inline" title="Ripple 取段电平：只统计曲线高于「峰值 − 该值」的连续段。电平越小越只看平坦顶，越不容易被两侧陡降带偏">取段电平
+        <label class="chk-inline" title="一次只看一个批次文件夹：DUO 或 SHAO">分组
+          <select id="dbpf-group" class="sel-sm"></select>
+        </label>
+        <label class="chk-inline" title="选择要对比的两个分区（例如同一批次文件夹里的 S1 与 S2）">对比
+          <select id="dbpf-stage-a" class="sel-sm"></select>
+          <span>⇄</span>
+          <select id="dbpf-stage-b" class="sel-sm"></select>
+        </label>
+        <label class="chk-inline" title="按中位数 ± 3.5×MAD 剔除明显偏离的 ripple（比如个别 2~8 dB 的毛刺），不影响原始数据">
+          <input type="checkbox" id="dbpf-exclude" checked> 排除异常
+        </label>
+        <label class="chk-inline" title="Ripple 取段电平：只统计曲线高于「峰值 − 该值」的平坦部分（再两侧各收 10%）。电平越小越只看平坦顶，越不会被两侧陡降带偏">取段电平
           <select id="dbpf-level" class="sel-sm">
             <option value="0.5" selected>0.5 dB</option>
             <option value="1">1 dB</option>
@@ -1408,6 +1419,9 @@ const state = {
   specSelected: null,  // {pn, file, name, spec, override}
   specOverride: null,  // 当前规格的用户编辑 {field:value}
   dbpfLevel: 0.5,      // 双通道 Ripple 取段电平（峰值 − N dB）
+  dbpfExclude: true,   // 双通道：按 3.5×MAD 剔除明显异常
+  dbpfGroup: '',       // 双通道：当前分组（DUO / SHAO）
+  dbpfA: '', dbpfB: '',
   yieldData: null,     // {header:[], rows:[{}], dateMin, dateMax}
   filters: { start:'', end:'', 一体机:[], 工单:[], 炉号:[], 烘烤次数:[], PN:[] },
   trendGran: 'week',
@@ -1800,6 +1814,28 @@ function bindSpectraEvents() {
   if (dbpfLevel) dbpfLevel.addEventListener('change', e => {
     state.dbpfLevel = Number(e.target.value) > 0 ? Number(e.target.value) : 0.5;
     renderDbpfPanel();
+  });
+  const dbpfGroupSel = $('#dbpf-group');
+  if (dbpfGroupSel) dbpfGroupSel.addEventListener('change', e => {
+    state.dbpfGroup = e.target.value || '';
+    state.dbpfA = ''; state.dbpfB = '';
+    renderDbpfPanel();
+  });
+  const dbpfEx = $('#dbpf-exclude');
+  if (dbpfEx) dbpfEx.addEventListener('change', e => {
+    state.dbpfExclude = !!e.target.checked;
+    renderDbpfPanel();
+  });
+  ['dbpf-stage-a', 'dbpf-stage-b'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const a = document.getElementById('dbpf-stage-a');
+      const b = document.getElementById('dbpf-stage-b');
+      state.dbpfA = a ? a.value : '';
+      state.dbpfB = b ? b.value : '';
+      renderDbpfPanel();
+    });
   });
   $('#btn-export-ng').addEventListener('click', exportNgList);
 
@@ -5860,15 +5896,15 @@ function dbpfCollect() {
   for (const st of sts) for (const c of st.data.keys()) if (!seen.has(c)) { seen.add(c); cavities.push(c); }
   cavities.sort(cavitySort);
   const rows = cavities.map(c => {
-    const per = sts.map(st => {
+    const per = {};
+    sts.forEach(st => {
       const d = st.data.get(c);
-      if (!d) return null;
-      return {
+      per[st.id] = d ? {
         m1: dbpfBandMetrics(d, ch.bands[0], level),
         m2: dbpfBandMetrics(d, ch.bands[1], level),
         s1: dbpfStopMetrics(d, ch.stops),
         s2: dbpfStopMetrics(d, ch.stops)
-      };
+      } : null;
     });
     return { cavity: c, per };
   });
@@ -5891,6 +5927,8 @@ function renderDbpfPanel() {
   box.style.display = '';
   const levelSel = $('#dbpf-level');
   if (levelSel && String(levelSel.value) !== String(level)) levelSel.value = String(level);
+  const exChk = $('#dbpf-exclude');
+  if (exChk) exChk.checked = state.dbpfExclude !== false;
   const label = $('#dbpf-spec-label');
   if (label) {
     label.textContent = `${spec.name || spec.pn || '规格'} · 通道1 ${ch.bands[0].start}~${ch.bands[0].end} nm（Ripple ≤ ${ch.bands[0].ripple ?? '—'}） · 通道2 ${ch.bands[1].start}~${ch.bands[1].end} nm（Ripple ≤ ${ch.bands[1].ripple ?? '—'}）`;
@@ -5909,19 +5947,89 @@ function renderDbpfPanel() {
     return;
   }
 
-  const stagesUse = sts.slice(0, 4);
+  const stagesUse = (() => {
+    /* 一次只看一个分组（DUO 或 SHAO），组内默认 S1 ⇄ S2 */
+    const dirOf = st => {
+      const f = (st.files || [])[0];
+      const p = f && f.webkitRelativePath ? String(f.webkitRelativePath) : '';
+      const parts = p.split('/');
+      return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+    };
+    const groupOf = st => {
+      const s = (dirOf(st) + ' ' + st.name).toUpperCase();
+      if (/SHAO|烧/.test(s)) return 'SHAO';
+      if (/DUO/.test(s)) return 'DUO';
+      return '其他';
+    };
+    const groups = Array.from(new Set(sts.map(groupOf)));
+    const gsel = $('#dbpf-group');
+    if (gsel) {
+      const html = groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+      if (gsel.innerHTML !== html) gsel.innerHTML = html;
+      let g = state.dbpfGroup && groups.includes(state.dbpfGroup) ? state.dbpfGroup : (groups.includes('DUO') ? 'DUO' : groups[0]);
+      gsel.value = g;
+      state.dbpfGroup = g;
+    }
+    const group = state.dbpfGroup || groups[0];
+    const stsG = sts.filter(s => groupOf(s) === group);
+    const byId = id => stsG.find(s => s.id === id);
+    let A = byId(state.dbpfA), B = byId(state.dbpfB);
+    if (!A || !B || A === B) {
+      const pick = re => stsG.find(s => re.test(dirOf(s) + ' ' + s.name));
+      const s1 = pick(/(?:^|[-_/\s])S1(?:$|[-_/\s])/i);
+      const s2 = pick(/(?:^|[-_/\s])S2(?:$|[-_/\s])/i);
+      if (s1 && s2) { A = s1; B = s2; }
+      else { A = stsG[0] || sts[0]; B = stsG[1] || stsG[0] || A; }
+    }
+    state.dbpfA = A.id; state.dbpfB = B.id;
+    const sa = $('#dbpf-stage-a'), sb = $('#dbpf-stage-b');
+    const opts = stsG.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+    if (sa) { if (sa.innerHTML !== opts) sa.innerHTML = opts; sa.value = A.id; }
+    if (sb) { if (sb.innerHTML !== opts) sb.innerHTML = opts; sb.value = B.id; }
+    return A === B ? [A] : [A, B];
+  })();
   const band = ch.bands;
-  const val = (r, si, bi) => {
-    const p = r.per[si];
+  const val = (r, st, bi) => {
+    const p = r.per[st.id];
     if (!p) return null;
     return bi === 0 ? (p.m1 && p.m1.ripple) : (p.m2 && p.m2.ripple);
   };
 
-  /* KPI：两个通道的 ripple 中位数（首/末分区）+ 超限数 */
+  /* 剔除明显异常：按「通道 × 分区」用中位数 ± 3.5×MAD 判定 */
+  const excludeOn = state.dbpfExclude !== false;
+  const outKeys = new Set();
+  const outCav = new Set();
+  const outByCh = [new Set(), new Set()];
+  const outCount = [0, 0];
+  if (excludeOn) {
+    for (const st of stagesUse) {
+      for (let bi = 0; bi < 2; bi++) {
+        const vals = rows.map(r => val(r, st, bi)).filter(v => v !== null);
+        if (vals.length < 5) continue;
+        const med = dbpfMedian(vals);
+        const mad = dbpfMedian(vals.map(v => Math.abs(v - med)));
+        const sigma = mad * 1.4826;
+        const hi = med + 3.5 * (sigma > 1e-4 ? sigma : 0.05);
+        rows.forEach(r => {
+          const v = val(r, st, bi);
+          if (v !== null && v > hi) {
+            outKeys.add(`${st.id}|${bi}|${r.cavity}`);
+            outCav.add(r.cavity);
+            outByCh[bi].add(r.cavity);
+            outCount[bi]++;
+          }
+        });
+      }
+    }
+  }
+  const isOut = (r, st, bi) => outKeys.has(`${st.id}|${bi}|${r.cavity}`);
+  const valOk = (r, st, bi) => isOut(r, st, bi) ? null : val(r, st, bi);
+
+  /* KPI：两个通道的 ripple 中位数（A → B）+ 超限数 */
   const cards = [];
-  const medOf = (si, bi) => dbpfMedian(rows.map(r => val(r, si, bi)));
+  const medOf = (si, bi) => dbpfMedian(rows.map(r => valOk(r, stagesUse[si], bi)));
   const overOf = (si, bi) => rows.filter(r => {
-    const v = val(r, si, bi);
+    const v = valOk(r, stagesUse[si], bi);
     return v !== null && band[bi].ripple !== null && v > band[bi].ripple + 1e-9;
   }).length;
   const card = (label, value, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
@@ -5960,7 +6068,7 @@ function renderDbpfPanel() {
         lineStyle: { width: 1.6, type: bi === 0 ? 'solid' : 'dashed', color: colors[si % colors.length] },
         itemStyle: { color: colors[si % colors.length] },
         data: rows.map(r => {
-          const v = val(r, si, bi);
+          const v = valOk(r, st, bi);
           return v === null ? null : round(v, 3);
         })
       });
@@ -5992,7 +6100,7 @@ function renderDbpfPanel() {
         if (!r) return '';
         let h = `<b>${esc(r.cavity)}</b>`;
         stagesUse.forEach((st, si) => {
-          const p = r.per[si];
+          const p = r.per[st.id];
           if (!p) return;
           const bits = [];
           for (let bi = 0; bi < 2; bi++) {
@@ -6031,27 +6139,34 @@ function renderDbpfPanel() {
     `<th>判定（${esc(dbpfStageName(stagesUse[stagesUse.length - 1], stagesUse.length - 1))}）</th></tr>`;
   const body = rows.map(r => {
     const cells = stagesUse.map((st, si) => {
-      const p = r.per[si];
+      const p = r.per[st.id];
       const f = (mm, bi) => {
         if (!p || !mm || mm.ripple === null) return '—';
+        if (isOut(r, st, bi)) return `<span style="color:#8c959f;text-decoration:line-through" title="明显异常，已剔除">${round(mm.ripple, 3)}</span>`;
         const over = band[bi].ripple !== null && mm.ripple > band[bi].ripple + 1e-9;
         return `<span style="${over ? 'color:#cf222e;font-weight:700' : ''}">${round(mm.ripple, 3)}</span>`;
       };
       return `<td class="num">${f(p && p.m1, 0)}</td><td class="num">${f(p && p.m2, 1)}</td>`;
     }).join('');
-    const last = r.per[r.per.length - 1];
+    const lastSt = stagesUse[stagesUse.length - 1];
+    const last = r.per[lastSt.id];
     let dcell = '';
     if (stagesUse.length > 1) {
-      const a1 = r.per[0] && r.per[0].m1, b1 = last && last.m1;
-      const a2 = r.per[0] && r.per[0].m2, b2 = last && last.m2;
-      const d1 = (a1 && b1 && a1.ripple !== null && b1.ripple !== null) ? b1.ripple - a1.ripple : null;
-      const d2 = (a2 && b2 && a2.ripple !== null && b2.ripple !== null) ? b2.ripple - a2.ripple : null;
+      const a1 = valOk(r, stagesUse[0], 0), b1 = valOk(r, lastSt, 0);
+      const a2 = valOk(r, stagesUse[0], 1), b2 = valOk(r, lastSt, 1);
+      const d1 = (a1 !== null && b1 !== null) ? b1 - a1 : null;
+      const d2 = (a2 !== null && b2 !== null) ? b2 - a2 : null;
       const sgn = v => v === null ? '—' : (v >= 0 ? '+' : '') + round(v, 3);
-      dcell = `<td class="num" style="color:${d1 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d1)}</td><td class="num" style="color:${d2 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d2)}</td>`;
+      dcell = `<td class="num" style="color:${d1 === null ? '#8c959f' : d1 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d1)}</td>` +
+        `<td class="num" style="color:${d2 === null ? '#8c959f' : d2 > 0 ? '#cf222e' : '#1a7f37'}">${sgn(d2)}</td>`;
     }
-    const bad = last ? dbpfJudge(last.m1, band[0], last.s1).concat(dbpfJudge(last.m2, band[1], last.s2)) : ['无数据'];
+    const skipped = isOut(r, lastSt, 0) || isOut(r, lastSt, 1);
+    const bad = skipped ? [] : (last ? dbpfJudge(last.m1, band[0], last.s1).concat(dbpfJudge(last.m2, band[1], last.s2)) : ['无数据']);
     const ok = bad.length === 0;
-    return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}${dcell}<td>${ok ? '<span style="color:#1a7f37">OK</span>' : `<span style="color:#cf222e">${esc(bad.join('；'))}</span>`}</td></tr>`;
+    const verdict = skipped
+      ? '<span style="color:#8c959f">异常剔除</span>'
+      : (ok ? '<span style="color:#1a7f37">OK</span>' : `<span style="color:#cf222e">${esc(bad.join('；'))}</span>`);
+    return `<tr><td><b>${esc(r.cavity)}</b></td>${cells}${dcell}<td>${verdict}</td></tr>`;
   }).join('');
   if (tableWrap) {
     tableWrap.innerHTML = `<div class="tbl-wrap" style="max-height:420px"><table class="tbl">` +
@@ -6059,11 +6174,16 @@ function renderDbpfPanel() {
   }
 
   if (note) {
-    const n1 = rows.filter(r => { const p = r.per[r.per.length - 1]; return p && p.m1 && band[0].ripple !== null && p.m1.ripple !== null && p.m1.ripple > band[0].ripple; }).length;
-    const n2 = rows.filter(r => { const p = r.per[r.per.length - 1]; return p && p.m2 && band[1].ripple !== null && p.m2.ripple !== null && p.m2.ripple > band[1].ripple; }).length;
-    note.innerHTML = `共 ${rows.length} 个腔位、${stagesUse.length} 个分区。` +
-      `Ripple 口径：峰值 ± 规格通带/2，只取 ≥ 峰值 − ${level} dB 的连续段；` +
-      `通道1 超规格 ${n1} 个、通道2 超规格 ${n2} 个（以最后一个分区判定）。` +
+    const lastSt = stagesUse[stagesUse.length - 1];
+    const n1 = rows.filter(r => { const v = valOk(r, lastSt, 0); return v !== null && band[0].ripple !== null && v > band[0].ripple + 1e-9; }).length;
+    const n2 = rows.filter(r => { const v = valOk(r, lastSt, 1); return v !== null && band[1].ripple !== null && v > band[1].ripple + 1e-9; }).length;
+    note.innerHTML = `共 ${rows.length} 个腔位、${stagesUse.length} 个分区（${esc(stagesUse.map(s => s.name).join(' ⇄ '))}）。` +
+      `Ripple 口径：以规格窗口内实测峰值为中心，量「峰值 − ${level} dB」宽度、两侧各收 10%，再与规格窗口取交集；` +
+      `通道1 超规格 ${n1} 个、通道2 超规格 ${n2} 个（以 ${esc(lastSt.name)} 判定）。` +
+      (excludeOn
+        ? `<br>已按 3.5×MAD 剔除明显异常：通道1 ${outCount[0]} 处、通道2 ${outCount[1]} 处` +
+          (outCav.size ? `（${esc([...outCav].slice(0, 10).join('、'))}${outCav.size > 10 ? ' 等' : ''}）` : '') + '；这些格子划掉、不参与统计。'
+        : '<br>未剔除异常点（勾选右上「排除异常」可按 3.5×MAD 剔除）。') +
       `<br>图上同一颜色是同一分区，实线=通道1、虚线=通道2；粉色点线是 Ripple 限值（取两通道中更严的）。`;
   }
 }
@@ -6081,7 +6201,8 @@ function exportDbpf() {
   });
   const body = rows.map(r => {
     const line = [r.cavity];
-    r.per.forEach(p => {
+    sts.forEach(st => {
+      const p = r.per[st.id];
       ch.bands.forEach((b, bi) => {
         const m = bi === 0 ? (p && p.m1) : (p && p.m2);
         line.push(m ? round(m.cw, 2) : '', m ? round(m.il, 2) : '', m && m.ripple !== null ? round(m.ripple, 3) : '');
