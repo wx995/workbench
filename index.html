@@ -523,14 +523,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
         <label class="chk-inline" title="按中位数 ± 3.5×MAD 剔除明显偏离的 ripple（比如个别 2~8 dB 的毛刺），不影响原始数据">
           <input type="checkbox" id="dbpf-exclude" checked> 排除异常
         </label>
-        <label class="chk-inline" title="Ripple 取段电平：只统计曲线高于「峰值 − 该值」的平坦部分（再两侧各收 10%）。电平越小越只看平坦顶，越不会被两侧陡降带偏">取段电平
-          <select id="dbpf-level" class="sel-sm">
-            <option value="0.5" selected>0.5 dB</option>
-            <option value="1">1 dB</option>
-            <option value="2">2 dB</option>
-            <option value="3">3 dB</option>
-          </select>
-        </label>
+        <label class="chk-inline" title="Ripple 口径与「读数据2.57」一致：规格窗口内 max−min；MaxIL 取窗口内最差透过率">口径：2.57</label>
         <button class="btn btn-sm" id="dbpf-export" title="导出每通道的 CW / 插损 / Ripple / 截止带判定">导出双通道明细</button>
       </div>
     </div>
@@ -574,25 +567,7 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
   </div>
 
   <div class="grid-2">
-    <div class="box">
-      <div class="box-header"><h3>本次分析重点</h3></div>
-      <div class="box-body">
-        <div class="flex-row">
-          <select id="focus-select" style="flex:1">
-            <option value="drift">阶段间参数漂移（重点看各参数变化量）</option>
-            <option value="ng">NG 分布与规格符合性（重点看合格判定）</option>
-            <option value="spectra">光谱形态对比（重点看曲线叠加）</option>
-            <option value="cutoff">截止点处变化</option>
-            <option value="cavity">指定腔位深挖（下方选择腔位）</option>
-            <option value="all">全量对比</option>
-          </select>
-          <input type="text" id="focus-custom" placeholder="自定义重点（可选）" style="flex:1">
-        </div>
-        <div class="box-note" id="focus-desc"></div>
-      </div>
-    </div>
-
-    <div class="box">
+    <div class="box" style="grid-column:1/-1">
       <div class="box-header">
         <h3>规格库（.spc）</h3>
         <div class="box-actions">
@@ -603,6 +578,10 @@ tr.wo-row.on td{background:rgba(9,105,218,.07)}
         </div>
       </div>
       <div class="box-body">
+        <div class="flex-row" style="margin-bottom:6px">
+          <input type="text" id="spec-search" placeholder="搜索 PN / 规格名 / 类型（如 90-93-0012、004A、DBPF）" style="flex:1">
+          <button class="btn btn-sm" id="spec-search-clear" title="清空搜索">清空</button>
+        </div>
         <div id="spc-status" class="box-note"></div>
         <div class="spec-tree" id="spec-tree"><div class="empty-hint">尚未导入规格库。支持导入整个规格目录（自动扫描全部 .spc）。</div></div>
         <div class="box-note">展开选择当前批次对应的规格文件；未匹配时可手动指定。支持 BPF 及长短波通等类型。</div>
@@ -1461,6 +1440,7 @@ const state = {
   dbpfExclude: true,   // 双通道：按 3.5×MAD 剔除明显异常
   dbpfChartMode: 'now', // 双通道图：now=现测 / aligned=移位 / both=两者
   dbpfGroup: '',       // 双通道：当前分组（DUO / SHAO）
+  specQuery: '',       // 规格库搜索词
   dbpfA: '', dbpfB: '',
   yieldData: null,     // {header:[], rows:[{}], dateMin, dateMax}
   filters: { start:'', end:'', 一体机:[], 工单:[], 炉号:[], 烘烤次数:[], PN:[] },
@@ -1845,8 +1825,7 @@ function bindSpectraEvents() {
   };
   $('#cavity-select').addEventListener('change', e => onCavityPicked(e.target.value));
   if (chartCavity) chartCavity.addEventListener('change', e => onCavityPicked(e.target.value));
-  $('#focus-select').addEventListener('change', onFocusChange);
-  $('#focus-custom').addEventListener('input', onFocusChange);
+  /* 「本次分析重点」已移除（光谱对比页精简） */
   $('#btn-export-compare').addEventListener('click', exportCompareTable);
   const dbpfBtn = $('#dbpf-export');
   if (dbpfBtn) dbpfBtn.addEventListener('click', () => {
@@ -2010,7 +1989,9 @@ function bindSpectraEvents() {
 }
 
 function onFocusChange() {
-  state.focus = $('#focus-select').value;
+  const sel = $('#focus-select');
+  if (!sel) return;
+  state.focus = sel.value;
   const custom = $('#focus-custom').value.trim();
   $('#focus-desc').textContent = custom ? '自定义重点：' + custom : '';
   renderCompareTable();
@@ -5839,6 +5820,15 @@ function bindSpecEvents() {
   $('#spc-dir-input').addEventListener('change', e => { if (e.target.files.length) importSpcFiles(Array.from(e.target.files)); e.target.value = ''; });
   $('#spc-file-input').addEventListener('change', e => { if (e.target.files.length) importSpcFiles(Array.from(e.target.files)); e.target.value = ''; });
   $('#spec-tree').addEventListener('click', onSpecTreeClick);
+  const specSearch = $('#spec-search');
+  if (specSearch) specSearch.addEventListener('input', e => { state.specQuery = e.target.value; renderSpecTree(); });
+  const specSearchClear = $('#spec-search-clear');
+  if (specSearchClear) specSearchClear.addEventListener('click', () => {
+    state.specQuery = '';
+    const el = $('#spec-search');
+    if (el) el.value = '';
+    renderSpecTree();
+  });
   $('#spec-mapping').addEventListener('input', onMappingInput);
   $('#spec-mapping').addEventListener('change', onMappingInput);
   $('#spec-mapping').addEventListener('click', onMappingReset);
@@ -5910,7 +5900,12 @@ function parseSpc(text) {
 function renderSpecTree() {
   const wrap = $('#spec-tree');
   if (!state.specLib) { wrap.innerHTML = '<div class="empty-hint">尚未导入规格库。</div>'; return; }
-  const items = state.specLib.items;
+  const items = (() => {
+    const q = String(state.specQuery || '').trim().toLowerCase();
+    const all = state.specLib.items;
+    if (!q) return all;
+    return all.filter(it => `${it.pn || ''} ${it.name || ''} ${it.type || ''} ${it.top || ''}`.toLowerCase().includes(q));
+  })();
   const byType = {};
   items.forEach(it => { (byType[it.type] = byType[it.type] || []).push(it); });
   const types = Object.keys(byType).sort();
@@ -6006,54 +6001,44 @@ function dbpfChannels(spec) {
   };
 }
 
-/* 单通道：CW（峰值波长）、IL、Ripple。
-   步骤：① 在规格通带窗口内找实测峰值；② 以峰值为中心，量出「峰值 − level」处的实测宽度；
-   ③ 两侧各向里收 10%（避开刚开始陡降的那一段），并与规格窗口取交集；④ 交集内 max−min = Ripple。*/
-function dbpfBandMetrics(d, band, level, trim) {
+/* 单通道指标（对齐「读数据2.57」DBPFData.CalculateRippleandMaxIL）：
+   MaxIL = 0 − 规格窗口内的最小透过率；Ripple = 窗口内 max − min（不切电平、不平移）。
+   另给一个「移位后」：把曲线按 2.57 的通带中点平移到规格中心后，同一窗口再算一次。 */
+function dbpfBandMetrics(d, band) {
   if (!d || !d.wl || d.wl.length < 10) return null;
   const wl = d.wl, val = d.val, n = wl.length;
-  const drop = isFinite(level) && level > 0 ? level : 0.5;
-  const tr = isFinite(trim) && trim >= 0 && trim < 0.5 ? trim : 0.1;
   let i0 = 0;
   while (i0 < n && wl[i0] < band.start) i0++;
   let i1 = n - 1;
   while (i1 >= 0 && wl[i1] > band.end) i1--;
   if (i1 - i0 < 2) return null;
-  let pi = i0;
-  for (let i = i0; i <= i1; i++) if (val[i] > val[pi]) pi = i;
-  const peakX = wl[pi], peakY = val[pi], thr = peakY - drop;
-  let l = pi;
-  while (l - 1 >= 0 && val[l - 1] >= thr) l--;
-  let r = pi;
-  while (r + 1 < n && val[r + 1] >= thr) r++;
-  const halfW = (wl[r] - wl[l]) / 2;
-  let lo = Math.max(band.start, peakX - halfW * (1 - tr));
-  let hi = Math.min(band.end, peakX + halfW * (1 - tr));
-  if (!(hi > lo)) { lo = Math.max(band.start, peakX - halfW); hi = Math.min(band.end, peakX + halfW); }
-  let mn = Infinity, mx = -Infinity, cnt = 0;
-  for (let i = 0; i < n; i++) {
-    const x = wl[i];
-    if (x >= lo && x <= hi) { cnt++; if (val[i] < mn) mn = val[i]; if (val[i] > mx) mx = val[i]; }
+  let mx = -Infinity, mn = Infinity, pi = i0;
+  for (let i = i0; i <= i1; i++) {
+    if (val[i] > mx) { mx = val[i]; pi = i; }
+    if (val[i] < mn) mn = val[i];
   }
-  const ripple = (cnt >= 3 && isFinite(mn)) ? (mx - mn) : null;
+  const ripple = mx - mn;
+  const il = -mn;
 
-  /* 把曲线平移到规格中心（按「实测通带中点」对齐，而不是峰值，峰值常偏在一侧）后，
-     在规格窗口内再算一次：波长偏短/偏长造成的假性 ripple 就被消掉 */
-  const center = (band.start + band.end) / 2;
-  const midX = (wl[l] + wl[r]) / 2;
-  const dl = center - midX;
+  /* 通带中点：从峰值向两侧走到「峰值 − 规格 Ripple」电平（没有 Ripple 就用 −3 dB） */
+  const lvl = (band.ripple !== null && isFinite(band.ripple) && band.ripple > 0) ? band.ripple : 3;
+  const thr = mx - lvl;
+  let l = pi; while (l - 1 >= 0 && val[l - 1] >= thr) l--;
+  let r = pi; while (r + 1 < n && val[r + 1] >= thr) r++;
+  const mid = (wl[l] + wl[r]) / 2;
+  const dlt = (band.start + band.end) / 2 - mid;
   let mn2 = Infinity, mx2 = -Infinity, cnt2 = 0;
   for (let i = 0; i < n; i++) {
-    const x = wl[i] + dl;
-    if (x >= band.start - 1e-9 && x <= band.end + 1e-9 && val[i] >= thr) {
+    const x = wl[i] + dlt;
+    if (x >= band.start - 1e-9 && x <= band.end + 1e-9) {
       cnt2++;
       if (val[i] < mn2) mn2 = val[i];
       if (val[i] > mx2) mx2 = val[i];
     }
   }
-  const rippleAligned = (cnt2 >= 3 && isFinite(mn2)) ? (mx2 - mn2) : null;
+  const rippleAligned = (cnt2 >= 3) ? (mx2 - mn2) : null;
 
-  return { cw: peakX, il: -peakY, ripple, rippleAligned, shift: dl, winLo: lo, winHi: hi, bandW: halfW * 2, pts: cnt };
+  return { cw: wl[pi], il, ripple, rippleAligned, ilShift: cnt2 >= 3 ? -mn2 : null, shift: dlt, winLo: band.start, winHi: band.end, pts: i1 - i0 + 1 };
 }
 
 /* 三个截止带：取带内最大电平 dB → 隔离度 = −max */
@@ -6393,9 +6378,9 @@ function renderDbpfPanel() {
   const head = `<tr><th>腔位</th>` +
     [0, 1].map(bi =>
       `<th class="num">通道${bi + 1}<br>${esc(stA.name)}</th>` +
-      (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ 现测<br>通道${bi + 1}</th><th class="num">Δ 移位<br>通道${bi + 1}</th>` : '')
+      (two ? `<th class="num">通道${bi + 1}<br>${esc(stB.name)}</th><th class="num">Δ 2.57<br>通道${bi + 1}</th><th class="num">Δ 移位<br>通道${bi + 1}</th>` : '')
     ).join('') +
-    `<th>判定（${esc(stB.name)}）<br>现测 / 移位</th></tr>`;
+    `<th>判定（${esc(stB.name)}）<br>2.57 / 移位</th></tr>`;
   const body = rows.map(r => {
     const cells = [0, 1].map(bi => {
       let html = cellHtml(r, stA, bi);
@@ -6432,7 +6417,7 @@ function renderDbpfPanel() {
         const badAl = dbpfJudge(mm, band[bi], stopsM, mm.rippleAligned);
         const tip = [badNow.length ? '现测：' + badNow.join('；') : '现测：达标',
           badAl.length ? '移位：' + badAl.join('；') : '移位：达标'].join(' / ');
-        return `<span title="${esc(tip)}">通${bi + 1} 现测${tag(!badNow.length)} 移位${tag(!badAl.length)}</span>`;
+        return `<span title="${esc(tip)}">通${bi + 1} 2.57${tag(!badNow.length)} 移位${tag(!badAl.length)}</span>`;
       });
       return parts.join('<br>');
     })();
