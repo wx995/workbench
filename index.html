@@ -12193,7 +12193,9 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
 
   function dashAgg(rows, a, b) {
-    const src = dashFilterLow(rows, a, b);
+    /* 良率看板所有指标都按 1HT 数据算（其余烘烤次数不参与），
+       这样 1HT 良率 + 烘烤率 + NG 率 + 波长长率 + 重测率 ≈ 100% */
+    const src = dashFilterLow(rows, a, b).filter(r => bakeKeyLoose(r.烘烤次数) === '1HT');
     let total = 0, ng = 0, wl = 0, retest = 0, bakeD = 0, onehtTotal = 0, onehtGood = 0, okAll = 0;
     for (const r of src) {
       if (r.date < a || r.date > b) continue;
@@ -12342,7 +12344,6 @@ document.addEventListener('DOMContentLoaded', dualInit);
           <div class="dash-sub">1HT ${c.onehtTotal.toLocaleString()} 只 · 良品 ${Math.round(c.onehtGood).toLocaleString()}</div>
         </div>
         <div class="dash-rows">
-          ${row('良品率', c.okRate === null ? '—' : fmtPct(c.okRate, 1), x.dOk, true)}
           ${row('烘烤率', c.bakeRate === null ? '—' : fmtPct(c.bakeRate, 2), x.dBake, false)}
           ${row('NG 率', c.ngRate === null ? '—' : fmtPct(c.ngRate, 2), x.dNg, false)}
           ${row('波长长率', x.is0263 ? '—' : (c.wlRate === null ? '—' : fmtPct(c.wlRate, 2)), x.dWl, false)}
@@ -12432,7 +12433,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
       <div class="dash-chart dash-chart-sm" id="dash-trend-delta"></div>
       ${trendTable()}
       <div class="dash-insight">${lines.map(t => `<div>· ${t}</div>`).join('')}</div>
-      <div class="box-note">口径：卡片大数是 1HT 良率 = 1HT 良品 / 1HT 测试数（分母只算 1HT）；下面的明细统一除以测试总数 —— 良品率 + 烘烤率 + NG 率 + 波长长率 + 重测率 ≈ 100%（烘烤率 = 烘烤D / 总数）。勾「剔除低良率工单」后按工单在该期间汇总，低于阈值的整单不参与统计（与「良率分析」同口径）。当前期间 ${curP.start} ~ ${curP.end}${prevP ? '，对比 ' + prevP.start + ' ~ ' + prevP.end : ''}。只统计完整期间（月看整月、周看周一~周日）；90-90-0263 不考核波长长，选波长长率时该 PN 留空。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意最多 6 个 PN 并记住。</div>`;
+      <div class="box-note">口径：看板所有指标都按 <b>1HT 数据</b>计算（其余烘烤次数不参与）；1HT 良率 + 烘烤率 + NG 率 + 波长长率 + 重测率 ≈ 100%（烘烤率 = 烘烤D / 1HT 测试数）。勾「剔除低良率工单」后按工单在该期间汇总，低于阈值的整单不参与统计（与「良率分析」同口径）。当前期间 ${curP.start} ~ ${curP.end}${prevP ? '，对比 ' + prevP.start + ' ~ ' + prevP.end : ''}。只统计完整期间（月看整月、周看周一~周日）；90-90-0263 不考核波长长，选波长长率时该 PN 留空。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意最多 6 个 PN 并记住。</div>`;
 
     renderTrendCharts(periods, series, metric);
   }
