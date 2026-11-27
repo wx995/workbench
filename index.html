@@ -12095,7 +12095,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
   const MAXP = 6;
   const METRICS = {
     oneht: { name: '1HT 良率', digits: 1 },
-    post: { name: '1HT 后良率', digits: 1 },
+    bake: { name: '烘烤率', digits: 2 },
     ng: { name: 'NG 率', digits: 2 },
     wl: { name: '波长长率', digits: 2 },
     retest: { name: '重测率', digits: 2 }
@@ -12111,6 +12111,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
   function dashMetric() {
     const m = String(localStorage.getItem(LSK_METRIC) || 'oneht');
+    if (m === 'post') return 'bake';      /* 旧版「1HT 后良率」已换成烘烤率 */
     return METRICS[m] ? m : 'oneht';
   }
 
@@ -12192,8 +12193,9 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
 
   function dashAgg(rows, a, b) {
+    const src = dashFilterLow(rows, a, b);
     let total = 0, ng = 0, wl = 0, retest = 0, bakeD = 0, onehtTotal = 0, onehtGood = 0;
-    for (const r of rows) {
+    for (const r of src) {
       if (r.date < a || r.date > b) continue;
       total += r.总数; ng += r.NG || 0; wl += r.波长长J || 0;
       retest += r.重测 || 0; bakeD += r.烘烤D || 0;
@@ -12210,8 +12212,30 @@ document.addEventListener('DOMContentLoaded', dualInit);
   }
 
   function metricOf(agg, m) {
-    return m === 'oneht' ? agg.onehtRate : m === 'post' ? agg.postRate :
+    return m === 'oneht' ? agg.onehtRate : m === 'bake' ? agg.bakeRate :
       m === 'ng' ? agg.ngRate : m === 'wl' ? agg.wlRate : agg.retestRate;
+  }
+
+  /* 统一剔除低良率工单（与「良率分析」同口径：按工单在该期间汇总，低于阈值整单剔除） */
+  function dashFilterLow(rows, a, b) {
+    let on = false, th = 50;
+    try {
+      on = localStorage.getItem('wb-dash-exlow') === '1';
+      th = Number(localStorage.getItem('wb-dash-exlow-th') || 50);
+    } catch (e) { /* ignore */ }
+    if (!on || !isFinite(th) || th <= 0) return rows;
+    const g = new Map();
+    for (const r of rows) {
+      if (r.date < a || r.date > b) continue;
+      const k = String(r.工单 || '').trim() || '__';
+      const x = g.get(k) || { t: 0, o: 0 };
+      x.t += r.总数 || 0; x.o += r.良品 || 0;
+      g.set(k, x);
+    }
+    const bad = new Set();
+    for (const [k, x] of g) if (x.t && x.o / x.t * 100 < th) bad.add(k);
+    if (!bad.size) return rows;
+    return rows.filter(r => !bad.has(String(r.工单 || '').trim() || '__'));
   }
 
   function dashTopPns(period) {
@@ -12294,7 +12318,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
       return {
         pn, cur, prev, is0263,
         dOneht: prev ? dpp(cur.onehtRate, prev.onehtRate) : null,
-        dPost: prev ? dpp(cur.postRate, prev.postRate) : null,
+        dBake: prev ? dpp(cur.bakeRate, prev.bakeRate) : null,
         dNg: prev ? dpp(cur.ngRate, prev.ngRate) : null,
         dWl: (is0263 || !prev) ? null : dpp(cur.wlRate, prev.wlRate),
         dRetest: prev ? dpp(cur.retestRate, prev.retestRate) : null
@@ -12316,7 +12340,7 @@ document.addEventListener('DOMContentLoaded', dualInit);
           <div class="dash-sub">1HT ${c.onehtTotal.toLocaleString()} 只 · 良品 ${Math.round(c.onehtGood).toLocaleString()}</div>
         </div>
         <div class="dash-rows">
-          ${row('1HT 后良率', c.postRate === null ? '—' : fmtPct(c.postRate, 1), x.dPost, true)}
+          ${row('烘烤率', c.bakeRate === null ? '—' : fmtPct(c.bakeRate, 2), x.dBake, false)}
           ${row('NG 率', c.ngRate === null ? '—' : fmtPct(c.ngRate, 2), x.dNg, false)}
           ${row('波长长率', x.is0263 ? '—' : (c.wlRate === null ? '—' : fmtPct(c.wlRate, 2)), x.dWl, false)}
           ${row('重测率', c.retestRate === null ? '—' : fmtPct(c.retestRate, 2), x.dRetest, false)}
@@ -12379,6 +12403,11 @@ document.addEventListener('DOMContentLoaded', dualInit);
 
     const granName = gran === 'month' ? '完整自然月' : gran === 'week' ? '完整自然周' : '最近 7 天';
     const metricOpts = Object.entries(METRICS).map(([k, v]) => `<option value="${k}"${k === metric ? ' selected' : ''}>${v.name}</option>`).join('');
+    let exOn = false, exTh = 50;
+    try {
+      exOn = localStorage.getItem('wb-dash-exlow') === '1';
+      exTh = Number(localStorage.getItem('wb-dash-exlow-th') || 50);
+    } catch (e) { /* ignore */ }
 
     /* 重写 innerHTML 会销毁图表容器；不先释放旧实例，切粒度/期间后图会画到已删除的 DOM 上（空白） */
     for (const cid of ['dash-trend', 'dash-trend-delta']) {
@@ -12391,13 +12420,16 @@ document.addEventListener('DOMContentLoaded', dualInit);
       <div class="dash-sec-head">
         <span class="dash-section-title">${granName}趋势 · 按 PN（点击行切换期间）</span>
         <label class="chk-inline">指标 <select id="dash-metric" class="sel-sm">${metricOpts}</select></label>
+        <label class="chk-inline" title="按工单汇总，低于阈值的工单整单剔除（与「良率分析」同口径）"><input type="checkbox" id="dash-exlow"${exOn ? ' checked' : ''}> 剔除低良率工单 &lt;</label>
+        <input type="number" id="dash-exlow-th" min="1" max="100" step="1" class="sel-sm" style="width:72px" value="${exTh}">
+        <span style="font-size:12px;color:var(--fg-muted)">%</span>
       </div>
       <div class="dash-chart" id="dash-trend"></div>
       <div class="dash-section-title">环比变化（相对上一期，单位 pp）</div>
       <div class="dash-chart dash-chart-sm" id="dash-trend-delta"></div>
       ${trendTable()}
       <div class="dash-insight">${lines.map(t => `<div>· ${t}</div>`).join('')}</div>
-      <div class="box-note">口径：1HT 良率 = 1HT 良品 / 1HT 测试数；1HT 后良率按炉号计算并剔除「1HT 后良品 > 1HT 总数」的重复记录；其余为对应列合计 / 测试总数。当前期间 ${curP.start} ~ ${curP.end}${prevP ? '，对比 ' + prevP.start + ' ~ ' + prevP.end : ''}。只统计完整期间（月看整月、周看周一~周日）；90-90-0263 不考核波长长，选波长长率时该 PN 留空。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意最多 6 个 PN 并记住。</div>`;
+      <div class="box-note">口径：1HT 良率 = 1HT 良品 / 1HT 测试数；烘烤率 = 烘烤D 合计 / 测试总数；其余为对应列合计 / 测试总数。勾「剔除低良率工单」后按工单在该期间汇总，低于阈值的整单不参与统计（与「良率分析」同口径）。当前期间 ${curP.start} ~ ${curP.end}${prevP ? '，对比 ' + prevP.start + ' ~ ' + prevP.end : ''}。只统计完整期间（月看整月、周看周一~周日）；90-90-0263 不考核波长长，选波长长率时该 PN 留空。默认展示 ${DEFAULT_PNS.map(esc).join(' / ')}（数据里缺的用产量前几名补齐），可在上方改成任意最多 6 个 PN 并记住。</div>`;
 
     renderTrendCharts(periods, series, metric);
   }
@@ -12560,8 +12592,19 @@ document.addEventListener('DOMContentLoaded', dualInit);
         renderDashboard();
       });
       wrap.addEventListener('change', e => {
-        if (e.target && e.target.id === 'dash-metric') {
+        if (!e.target) return;
+        if (e.target.id === 'dash-metric') {
           localStorage.setItem(LSK_METRIC, e.target.value);
+          renderDashboard();
+          return;
+        }
+        if (e.target.id === 'dash-exlow') {
+          localStorage.setItem('wb-dash-exlow', e.target.checked ? '1' : '0');
+          renderDashboard();
+          return;
+        }
+        if (e.target.id === 'dash-exlow-th') {
+          localStorage.setItem('wb-dash-exlow-th', String(Number(e.target.value) || 50));
           renderDashboard();
         }
       });
